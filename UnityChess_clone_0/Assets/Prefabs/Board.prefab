@@ -12,6 +12,7 @@ GameObject:
   - component: {fileID: 33502268323535610}
   - component: {fileID: 23148799168284738}
   - component: {fileID: 878072504}
+  - component: {fileID: 5477921331946433930}
   m_Layer: 0
   m_Name: Board
   m_TagString: Board
@@ -32,7 +33,7 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
-  m_RootOrder: 0
+  m_RootOrder: 1
   m_LocalEulerAnglesHint: {x: 270, y: 0, z: 0}
 --- !u!33 &33502268323535610
 MeshFilter:
@@ -99,3 +100,24 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 2cba141883d2397458218c5ab03c6355, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  Square: {fileID: 2376663233806725356, guid: 8cc12b0140ccd314fb57fdd0ad5c8218, type: 3}
+--- !u!114 &5477921331946433930
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1737744047434168}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d5a57f767e5e46a458fc5d3c628d0cbb, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  GlobalObjectIdHash: 951099334
+  AlwaysReplicateAsRoot: 0
+  SynchronizeTransform: 1
+  ActiveSceneSynchronization: 0
+  SceneMigrationSynchronization: 1
+  SpawnWithObservers: 1
+  DontDestroyWithOwner: 0
+  AutoObjectParentSync: 1

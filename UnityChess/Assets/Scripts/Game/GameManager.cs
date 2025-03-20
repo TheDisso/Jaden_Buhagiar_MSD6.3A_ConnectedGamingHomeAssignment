@@ -1,10 +1,12 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Unity.Netcode;
 using UnityChess;
 using UnityEngine;
+using Newtonsoft.Json;
 using static UnityChess.SquareUtil;
 
 /// <summary>
@@ -14,339 +16,111 @@ using static UnityChess.SquareUtil;
 /// </summary>
 public class GameManager : NetworkBehaviourSingleton<GameManager>
 {
-    /*    public static event Action NewGameStartedEvent;
-        public static event Action GameEndedEvent;
-        public static event Action GameResetToHalfMoveEvent;
-        public static event Action MoveExecutedEvent;
-
-        private NetworkVariable<bool> isWhiteTurn = new NetworkVariable<bool>(true);
-        private Dictionary<ulong, Side> playerSides = new Dictionary<ulong, Side>();
-        private Game game;
-
-        private CancellationTokenSource promotionUITaskCancellationTokenSource;
-        private ElectedPiece userPromotionChoice = ElectedPiece.None;
-        private Dictionary<GameSerializationType, IGameSerializer> serializersByType;
-        private GameSerializationType selectedSerializationType = GameSerializationType.FEN;
-
-        public Board CurrentBoard
-        {
-            get
-            {
-                game.BoardTimeline.TryGetCurrent(out Board currentBoard);
-                return currentBoard;
-            }
-        }
-
-        public Side SideToMove => isWhiteTurn.Value ? Side.White : Side.Black;
-        /// <summary>
-        /// Gets the side that started the game.
-        /// </summary>
-        public Side StartingSide => game.ConditionsTimeline[0].SideToMove;
-
-        public int FullMoveNumber => StartingSide switch
-        {
-            Side.White => LatestHalfMoveIndex / 2 + 1,
-            Side.Black => (LatestHalfMoveIndex + 1) / 2 + 1,
-            _ => -1
-        };
-
-
-        public Timeline<HalfMove> HalfMoveTimeline => game.HalfMoveTimeline;
-        public int LatestHalfMoveIndex => game.HalfMoveTimeline.HeadIndex;
-
-        private readonly List<(Square, Piece)> currentPiecesBacking = new List<(Square, Piece)>();
-
-        public override void OnNetworkSpawn()
-        {
-            if (IsServer)
-            {
-                AssignPlayerServerRpc(NetworkManager.Singleton.LocalClientId);
-            }
-        }
-
-        public List<(Square, Piece)> CurrentPieces
-        {
-            get
-            {
-                currentPiecesBacking.Clear();
-                for (int file = 1; file <= 8; file++)
-                {
-                    for (int rank = 1; rank <= 8; rank++)
-                    {
-                        Piece piece = CurrentBoard[file, rank];
-                        if (piece != null) currentPiecesBacking.Add((new Square(file, rank), piece));
-                    }
-                }
-                return currentPiecesBacking;
-            }
-        }
-        /// <summary>
-        /// Unity's Start method initializes event handlers and game setup.
-        /// </summary>
-        private void Start()
-        {
-            if (IsServer)
-            {
-                playerSides.Clear();
-            }
-
-            VisualPiece.VisualPieceMoved += OnPieceMoved; // Fixing missing reference
-
-            serializersByType = new Dictionary<GameSerializationType, IGameSerializer>
-            {
-                [GameSerializationType.FEN] = new FENSerializer(),
-                [GameSerializationType.PGN] = new PGNSerializer()
-            };
-
-            if (IsServer)
-            {
-                StartNewGame();
-            }
-        }
-
-        /// <summary>
-        /// Assigns players to White or Black.
-        /// </summary>
-        [ServerRpc(RequireOwnership = false)]
-        public void AssignPlayerServerRpc(ulong playerId)
-        {
-            if (!playerSides.ContainsKey(playerId))
-            {
-                playerSides[playerId] = playerSides.Count == 0 ? Side.White : Side.Black;
-            }
-        }
-
-        /// <summary>
-        /// Checks if the requesting player is allowed to move.
-        /// </summary>
-        private bool IsMoveAllowed(ulong playerId)
-        {
-            return playerSides.TryGetValue(playerId, out Side side) && side == SideToMove;
-        }
-
-        /// <summary>
-        /// Handles player move requests.
-        /// </summary>
-        [ServerRpc(RequireOwnership = false)]
-        public void RequestMoveServerRpc(Vector2Int from, Vector2Int to, ulong playerId)
-        {
-            if (!IsMoveAllowed(playerId)) return; // Enforce turn order
-
-            if (game.TryGetLegalMove(new Square(from.x, from.y), new Square(to.x, to.y), out Movement move))
-            {
-                if (TryExecuteMove(move))
-                {
-                    isWhiteTurn.Value = !isWhiteTurn.Value; // Switch turns
-                    SyncBoardStateClientRpc(SerializeGame()); // Send board update
-                }
-            }
-        }
-
-        /// <summary>
-        /// Synchronizes the board state for all clients.
-        /// </summary>
-        [ClientRpc]
-        private void SyncBoardStateClientRpc(string fenState)
-        {
-            LoadGame(fenState);
-        }
-
-        /// <summary>
-        /// Executes a given move.
-        /// </summary>
-        private bool TryExecuteMove(Movement move)
-        {
-            if (!game.TryExecuteMove(move)) return false;
-
-            HalfMoveTimeline.TryGetCurrent(out HalfMove latestHalfMove);
-
-            if (latestHalfMove.CausedCheckmate || latestHalfMove.CausedStalemate)
-            {
-                GameOverClientRpc(latestHalfMove.CausedCheckmate ? $"{SideToMove.Complement()} Wins!" : "Draw.");
-            }
-
-            MoveExecutedEvent?.Invoke();
-            return true;
-        }
-
-        /// <summary>
-        /// Notifies clients when the game ends.
-        /// </summary>
-        [ClientRpc]
-        private void GameOverClientRpc(string message)
-        {
-            UIManager.Instance.DisplayGameOverMessage(message);
-        }
-
-        /// <summary>
-        /// Starts a new game on the server and syncs it with all clients.
-        /// </summary>
-        public void StartNewGame()
-        {
-            if (!IsServer) return;
-
-            game = new Game();
-            isWhiteTurn.Value = true;
-            NewGameStartedEvent?.Invoke();
-            SyncBoardStateClientRpc(SerializeGame());
-        }
-
-        /// <summary>
-        /// Serializes the current game state.
-        /// </summary>
-        public string SerializeGame()
-        {
-            return serializersByType.TryGetValue(selectedSerializationType, out IGameSerializer serializer)
-                ? serializer?.Serialize(game)
-                : null;
-        }
-
-        /// <summary>
-        /// Loads a game from a serialized game state string.
-        /// </summary>
-        public void LoadGame(string serializedGame)
-        {
-            game = serializersByType[selectedSerializationType].Deserialize(serializedGame);
-            NewGameStartedEvent?.Invoke();
-        }
-
-        /// <summary>
-        /// Fixing the missing `OnPieceMoved` method.
-        /// </summary>
-        private void OnPieceMoved(Square movedPieceInitialSquare, Transform movedPieceTransform, Transform closestBoardSquareTransform, Piece promotionPiece = null)
-        {
-            Vector2Int from = new Vector2Int(movedPieceInitialSquare.File, movedPieceInitialSquare.Rank);
-            Vector2Int to = new Vector2Int(StringToSquare(closestBoardSquareTransform.name).File, StringToSquare(closestBoardSquareTransform.name).Rank);
-
-            RequestMoveServerRpc(from, to, NetworkManager.Singleton.LocalClientId);
-        }
-
-        /// <summary>
-        /// Resets the game to a specific half-move index.
-        /// </summary>
-        public void ResetGameToHalfMoveIndex(int halfMoveIndex)
-        {
-            if (!game.ResetGameToHalfMoveIndex(halfMoveIndex)) return;
-
-            UIManager.Instance.SetActivePromotionUI(false);
-            promotionUITaskCancellationTokenSource?.Cancel();
-            GameResetToHalfMoveEvent?.Invoke();
-        }
-
-        /// <summary>
-        /// Handles special move behavior.
-        /// </summary>
-        private async Task<bool> TryHandleSpecialMoveBehaviourAsync(SpecialMove specialMove)
-        {
-            switch (specialMove)
-            {
-                case CastlingMove castlingMove:
-                    BoardManager.Instance.CastleRook(castlingMove.RookSquare, castlingMove.GetRookEndSquare());
-                    return true;
-                case EnPassantMove enPassantMove:
-                    BoardManager.Instance.TryDestroyVisualPiece(enPassantMove.CapturedPawnSquare);
-                    return true;
-                case PromotionMove { PromotionPiece: null } promotionMove:
-                    UIManager.Instance.SetActivePromotionUI(true);
-                    BoardManager.Instance.SetActiveAllPieces(false);
-
-                    promotionUITaskCancellationTokenSource?.Cancel();
-                    promotionUITaskCancellationTokenSource = new CancellationTokenSource();
-
-                    ElectedPiece choice = await Task.Run(GetUserPromotionPieceChoice, promotionUITaskCancellationTokenSource.Token);
-
-                    UIManager.Instance.SetActivePromotionUI(false);
-                    BoardManager.Instance.SetActiveAllPieces(true);
-
-                    if (promotionUITaskCancellationTokenSource == null || promotionUITaskCancellationTokenSource.Token.IsCancellationRequested)
-                    {
-                        return false;
-                    }
-
-                    promotionMove.SetPromotionPiece(PromotionUtil.GeneratePromotionPiece(choice, SideToMove));
-                    BoardManager.Instance.TryDestroyVisualPiece(promotionMove.Start);
-                    BoardManager.Instance.TryDestroyVisualPiece(promotionMove.End);
-                    BoardManager.Instance.CreateAndPlacePieceGO(promotionMove.PromotionPiece, promotionMove.End);
-
-                    promotionUITaskCancellationTokenSource = null;
-                    return true;
-                case PromotionMove promotionMove:
-                    BoardManager.Instance.TryDestroyVisualPiece(promotionMove.Start);
-                    BoardManager.Instance.TryDestroyVisualPiece(promotionMove.End);
-                    BoardManager.Instance.CreateAndPlacePieceGO(promotionMove.PromotionPiece, promotionMove.End);
-                    return true;
-                default:
-                    return false;
-            }
-        }
-
-        private ElectedPiece GetUserPromotionPieceChoice()
-        {
-            while (userPromotionChoice == ElectedPiece.None) { }
-            ElectedPiece result = userPromotionChoice;
-            userPromotionChoice = ElectedPiece.None;
-            return result;
-        }
-
-        public void ElectPiece(ElectedPiece choice)
-        {
-            userPromotionChoice = choice;
-        }
-        public bool HasLegalMoves(Piece piece)
-        {
-            return game.TryGetLegalMovesForPiece(piece, out _);
-        }*/
-
-    // Events signalling various game state changes.
+    // Events signaling various game state changes.
     public static event Action NewGameStartedEvent;
     public static event Action GameEndedEvent;
     public static event Action GameResetToHalfMoveEvent;
     public static event Action MoveExecutedEvent;
+    public NetworkVariable<Side> NetworkSideToMove = new NetworkVariable<Side>(Side.White,
+    NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
+
+    public ulong LocalPlayerId => NetworkManager.Singleton.LocalClientId;
+    public List<ulong> PlayersConnected = new List<ulong>();
+
+    public NetworkVariable<bool> isCurrTurn = new NetworkVariable<bool>();
+
+    private Game game;
+
+    public override void OnNetworkSpawn()
+    {
+        base.OnNetworkSpawn();
+        NetworkManager.Singleton.OnClientConnectedCallback += OnClientPlayerConnected;
+        NetworkManager.Singleton.OnClientDisconnectCallback += OnClientPlayerDisconnected;
+
+        if (IsServer)
+        {
+            game = game ?? new Game(); // Ensure game is initialized
+            NetworkSideToMove.Value = game.ConditionsTimeline[0].SideToMove;
+        }
+    }
 
     /// <summary>
-    /// Gets the current board state from the game.
+    /// Returns the current board state.
     /// </summary>
     public Board CurrentBoard
     {
         get
         {
-            // Attempts to retrieve the current board from the board timeline.
             game.BoardTimeline.TryGetCurrent(out Board currentBoard);
             return currentBoard;
         }
     }
 
     /// <summary>
-    /// Gets the side (White/Black) whose turn it is to move.
+    /// Returns the current turn's side.
     /// </summary>
-    public Side SideToMove
+    /*public Side SideToMove
     {
         get
         {
-            // Retrieves the current game conditions and returns the active side.
             game.ConditionsTimeline.TryGetCurrent(out GameConditions currentConditions);
             return currentConditions.SideToMove;
         }
+        set
+        {
+            game.ConditionsTimeline.TryGetCurrent(out GameConditions currentConditions);
+            currentConditions = new GameConditions(value,
+                currentConditions.WhiteCanCastleKingside,
+                currentConditions.WhiteCanCastleQueenside,
+                currentConditions.BlackCanCastleKingside,
+                currentConditions.BlackCanCastleQueenside,
+                currentConditions.EnPassantSquare,
+                currentConditions.HalfMoveClock,
+                currentConditions.TurnNumber
+            );
+            game.ConditionsTimeline[game.ConditionsTimeline.HeadIndex] = currentConditions;
+        }
+    }*/
+    public Side SideToMove
+    {
+        get => NetworkSideToMove.Value; // Clients now read from the NetworkVariable
+
+        set
+        {
+            if (IsServer) // Only the server can modify this
+            {
+                game.ConditionsTimeline.TryGetCurrent(out GameConditions currentConditions);
+                currentConditions = new GameConditions(value,
+                    currentConditions.WhiteCanCastleKingside,
+                    currentConditions.WhiteCanCastleQueenside,
+                    currentConditions.BlackCanCastleKingside,
+                    currentConditions.BlackCanCastleQueenside,
+                    currentConditions.EnPassantSquare,
+                    currentConditions.HalfMoveClock,
+                    currentConditions.TurnNumber
+                );
+                game.ConditionsTimeline[game.ConditionsTimeline.HeadIndex] = currentConditions;
+
+                // Sync with clients
+                NetworkSideToMove.Value = value;
+            }
+            else
+            {
+                // If a client attempts to modify, request it from the server
+                RequestSideToMoveServerRpc(value);
+            }
+        }
     }
 
-    /// <summary>
-    /// Gets the side that started the game.
-    /// </summary>
+    [ServerRpc(RequireOwnership = false)]
+    private void RequestSideToMoveServerRpc(Side requestedSide)
+    {
+        SideToMove = requestedSide; // Server updates the game state
+    }
+
     public Side StartingSide => game.ConditionsTimeline[0].SideToMove;
-
-    /// <summary>
-    /// Gets the timeline of half-moves made in the game.
-    /// </summary>
     public Timeline<HalfMove> HalfMoveTimeline => game.HalfMoveTimeline;
-
-    /// <summary>
-    /// Gets the index of the most recent half-move.
-    /// </summary>
     public int LatestHalfMoveIndex => game.HalfMoveTimeline.HeadIndex;
-
-    /// <summary>
-    /// Computes the full move number based on the starting side and the latest half-move index.
-    /// </summary>
     public int FullMoveNumber => StartingSide switch
     {
         Side.White => LatestHalfMoveIndex / 2 + 1,
@@ -357,36 +131,27 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
     private bool isWhiteAI;
     private bool isBlackAI;
 
-    /// <summary>
-    /// Gets a list of all current pieces on the board, along with their positions.
-    /// </summary>
     public List<(Square, Piece)> CurrentPieces
     {
         get
         {
-            // Clear the backing list before populating with current pieces.
-            currentPiecesBacking.Clear();
-            // Iterate over every square on the board.
+            List<(Square, Piece)> currentPieces = new List<(Square, Piece)>();
             for (int file = 1; file <= 8; file++)
             {
                 for (int rank = 1; rank <= 8; rank++)
                 {
                     Piece piece = CurrentBoard[file, rank];
-                    // If a piece exists at this position, add it to the list.
-                    if (piece != null) currentPiecesBacking.Add((new Square(file, rank), piece));
+                    if (piece != null)
+                        currentPieces.Add((new Square(file, rank), piece));
                 }
             }
-            return currentPiecesBacking;
+            return currentPieces;
         }
     }
-
-    // Backing list for storing current pieces on the board.
-    private readonly List<(Square, Piece)> currentPiecesBacking = new List<(Square, Piece)>();
 
     // Reference to the debug utility for the chess engine.
     [SerializeField] private UnityChessDebug unityChessDebug;
     // The current game instance.
-    private Game game;
     // Serializers for game state (FEN and PGN formats).
     private FENSerializer fenSerializer;
     private PGNSerializer pgnSerializer;
@@ -399,78 +164,303 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
     // Currently selected serialization type (default is FEN).
     private GameSerializationType selectedSerializationType = GameSerializationType.FEN;
 
-    /// <summary>
-    /// Unity's Start method initialises the game and sets up event handlers.
-    /// </summary>
     public void Start()
     {
-        // Subscribe to the event triggered when a visual piece is moved.
         VisualPiece.VisualPieceMoved += OnPieceMoved;
-
-        // Initialise the serializers for FEN and PGN formats.
-        serializersByType = new Dictionary<GameSerializationType, IGameSerializer>
-        {
-            [GameSerializationType.FEN] = new FENSerializer(),
-            [GameSerializationType.PGN] = new PGNSerializer()
-        };
-
-        // Begin a new game.
         StartNewGame();
-
-#if DEBUG_VIEW
-		// Enable debug view if compiled with DEBUG_VIEW flag.
-		unityChessDebug.gameObject.SetActive(true);
-		unityChessDebug.enabled = true;
-#endif
     }
 
-    /// <summary>
-    /// Starts a new game by creating a new game instance and invoking the NewGameStartedEvent.
-    /// </summary>
     public async void StartNewGame()
     {
         if (IsServer)
         {
             game = new Game();
-            //AssignRoles();
             NewGameStartedEvent?.Invoke();
         }
     }
 
-    /*private void AssignRoles()
-    {
-        if (IsServer)
-        {
-            // The host (server) is always White
-            NetworkManager.Singleton.ConnectedClients[NetworkManager.Singleton.LocalClientId].PlayerObject.GetComponent<PlayerData>().side = Side.White;
-        }
-
-        if (IsClient)
-        {
-            // The client is always Black
-            NetworkManager.Singleton.ConnectedClients[NetworkManager.Singleton.LocalClientId].PlayerObject.GetComponent<PlayerData>().side = Side.Black;
-        }
-    }*/
-
     /// <summary>
-    /// Serialises the current game state using the selected serialization format.
+    /// Executes a move on the server and sends updates to clients.
     /// </summary>
-    /// <returns>A string representing the serialised game state.</returns>
-    public string SerializeGame()
+    public void ExecuteMove(int fromFile, int fromRank, int toFile, int toRank)
     {
-        return serializersByType.TryGetValue(selectedSerializationType, out IGameSerializer serializer)
-            ? serializer?.Serialize(game)
-            : null;
+        Square startSquare = new Square(fromFile, fromRank);
+        Square endSquare = new Square(toFile, toRank);
+
+        if (!game.TryGetLegalMove(startSquare, endSquare, out Movement move))
+        {
+            Debug.LogWarning("[GameManager] Illegal move attempted!");
+            return;
+        }
+
+        if (TryExecuteMove(move))
+        {
+            ApplyMoveClientRpc(JsonConvert.SerializeObject(move));
+            AssignRole(); // <-- Ensure role assignment after move execution
+        }
     }
 
     /// <summary>
-    /// Loads a game from the given serialised game state string.
+    /// Sends move updates to all clients.
     /// </summary>
-    /// <param name="serializedGame">The serialised game state string.</param>
+    [ClientRpc]
+    private void ApplyMoveClientRpc(string moveJson)
+    {
+        Movement move = JsonConvert.DeserializeObject<Movement>(moveJson);
+        BoardManager.Instance.MovePieceOnClient(move.Start.File, move.Start.Rank, move.End.File, move.End.Rank);
+    }
+
+    /// <summary>
+    /// Blocks until the user selects a piece for pawn promotion.
+    /// </summary>
+    /// <returns>The elected promotion piece chosen by the user.</returns>
+    private ElectedPiece GetUserPromotionPieceChoice()
+    {
+        // Wait until the user selects a promotion piece.
+        while (userPromotionChoice == ElectedPiece.None) { }
+
+        ElectedPiece result = userPromotionChoice;
+        // Reset the user promotion choice.
+        userPromotionChoice = ElectedPiece.None;
+        return result;
+    }
+
+    /// <summary>
+    /// Handles special move behavior asynchronously (castling, en passant, and promotion).
+    /// </summary>
+    /// <param name="specialMove">The special move to process.</param>
+    /// <returns>A task that resolves to true if the special move was handled; otherwise, false.</returns>
+    private async Task<bool> TryHandleSpecialMoveBehaviourAsync(SpecialMove specialMove)
+    {
+        switch (specialMove)
+        {
+            // Handle castling move.
+            case CastlingMove castlingMove:
+                BoardManager.Instance.CastleRook(castlingMove.RookSquare, castlingMove.GetRookEndSquare());
+                return true;
+
+            // Handle en passant move.
+            case EnPassantMove enPassantMove:
+                BoardManager.Instance.TryDestroyVisualPiece(enPassantMove.CapturedPawnSquare);
+                return true;
+
+            // Handle promotion move when no promotion piece has been selected yet.
+            case PromotionMove { PromotionPiece: null } promotionMove:
+                UIManager.Instance.SetActivePromotionUI(true);
+                BoardManager.Instance.SetActiveAllPieces(false);
+
+                // Cancel any pending promotion UI tasks.
+                promotionUITaskCancellationTokenSource?.Cancel();
+                promotionUITaskCancellationTokenSource = new CancellationTokenSource();
+
+                // Await user's promotion choice asynchronously.
+                ElectedPiece choice = await Task.Run(GetUserPromotionPieceChoice, promotionUITaskCancellationTokenSource.Token);
+
+                UIManager.Instance.SetActivePromotionUI(false);
+                BoardManager.Instance.SetActiveAllPieces(true);
+
+                if (promotionUITaskCancellationTokenSource == null || promotionUITaskCancellationTokenSource.Token.IsCancellationRequested)
+                {
+                    return false;
+                }
+
+                promotionMove.SetPromotionPiece(PromotionUtil.GeneratePromotionPiece(choice, SideToMove));
+
+                BoardManager.Instance.TryDestroyVisualPiece(promotionMove.Start);
+                BoardManager.Instance.TryDestroyVisualPiece(promotionMove.End);
+                BoardManager.Instance.CreateAndPlacePieceGO(promotionMove.PromotionPiece, promotionMove.End);
+
+                promotionUITaskCancellationTokenSource = null;
+                return true;
+
+            // Handle promotion move when the promotion piece is already set.
+            case PromotionMove promotionMove:
+                BoardManager.Instance.TryDestroyVisualPiece(promotionMove.Start);
+                BoardManager.Instance.TryDestroyVisualPiece(promotionMove.End);
+                BoardManager.Instance.CreateAndPlacePieceGO(promotionMove.PromotionPiece, promotionMove.End);
+                return true;
+
+            default:
+                return false;
+        }
+    }
+
+    private async void OnPieceMoved(Square movedPieceInitialSquare, Transform movedPieceTransform, Transform closestBoardSquareTransform, Piece promotionPiece = null)
+    {
+        ulong localPlayerId = NetworkManager.Singleton.LocalClientId;
+
+        if (!IsPlayerTurn())
+        {
+            Debug.LogWarning($"[GameManager] Player {localPlayerId} tried moving but it's not their turn!");
+            return;
+        }
+
+        Square endSquare = new Square(closestBoardSquareTransform.name);
+        if (!game.TryGetLegalMove(movedPieceInitialSquare, endSquare, out Movement move))
+        {
+            Debug.LogWarning($"[GameManager] Illegal move attempted by Player {localPlayerId} from {movedPieceInitialSquare} to {endSquare}");
+            movedPieceTransform.position = movedPieceTransform.parent.position;
+            return;
+        }
+
+        if (move is PromotionMove promotionMove)
+        {
+            promotionMove.SetPromotionPiece(promotionPiece);
+        }
+
+        if ((move is not SpecialMove specialMove || await TryHandleSpecialMoveBehaviourAsync(specialMove)) && TryExecuteMove(move))
+        {
+            if (move is not SpecialMove)
+            {
+                BoardManager.Instance.TryDestroyVisualPiece(move.End);
+            }
+
+            if (move is PromotionMove)
+            {
+                movedPieceTransform = BoardManager.Instance.GetPieceGOAtPosition(move.End).transform;
+            }
+
+            int movePieceInitSquareFile = movedPieceInitialSquare.File;
+            int movePieceInitSquareRank = movedPieceInitialSquare.Rank;
+            int squareFile = endSquare.File;
+            int squareRank = endSquare.Rank;
+
+            // Request the server to move the piece
+            RequestMovePieceServerRpc(movePieceInitSquareFile, movePieceInitSquareRank, squareFile, squareRank, movedPieceTransform.GetComponent<NetworkObject>());
+        }
+    }
+
+    /// 🔹 **NEW**: Server RPC to process the move
+    [ServerRpc(RequireOwnership = false)]
+    private void RequestMovePieceServerRpc(int movePieceInitSquareFile, int movePieceInitSquareRank, int squareFile, int squareRank, NetworkObjectReference pieceRef)
+    {
+        Square movePieceInitSquare = new Square(movePieceInitSquareFile, movePieceInitSquareRank);
+        Square endSquare = new Square(squareFile, squareRank);
+
+        if (!game.TryGetLegalMove(movePieceInitSquare, endSquare, out Movement move))
+        {
+            Debug.LogWarning($"[GameManager] Server: Illegal move attempted from {movePieceInitSquare} to {endSquare}");
+            return;
+        }
+
+        // ✅ Server updates game state
+        if (TryExecuteMove(move))
+        {
+            if (move is not SpecialMove)
+            {
+                BoardManager.Instance.TryDestroyVisualPiece(move.End);
+            }
+
+            // ✅ Server instructs all clients to move the piece
+            MovePieceOnClientsClientRpc(movePieceInitSquareFile, movePieceInitSquareRank, squareFile, squareRank, pieceRef);
+        }
+    }
+
+    /// 🔹 **NEW**: Client RPC to update all players
+    [ClientRpc]
+    private void MovePieceOnClientsClientRpc(int movePieceInitSquareFile, int movePieceInitSquareRank, int squareFile, int squareRank, NetworkObjectReference pieceRef)
+    {
+        Square movePieceInitSquare = new Square(movePieceInitSquareFile, movePieceInitSquareRank);
+        Square endSquare = new Square(squareFile, squareRank);
+
+        if (pieceRef.TryGet(out NetworkObject pieceNetObj))
+        {
+            Transform pieceTransform = pieceNetObj.transform;
+            GameObject targetSquareGO = BoardManager.Instance.GetSquareGOByPosition(endSquare);
+
+            if (targetSquareGO != null)
+            {
+                pieceTransform.SetParent(targetSquareGO.transform);
+                pieceTransform.position = targetSquareGO.transform.position;
+                Debug.Log($"[BoardManager] Successfully moved piece on client to {endSquare}");
+            }
+            else
+            {
+                Debug.LogError($"[BoardManager] ERROR: Could not find target square {endSquare}");
+            }
+        }
+    }
+
+    public bool IsPlayerTurn()
+    {
+        if (PlayersConnected.Count != 2)
+        {
+            Debug.LogWarning($"[GameManager] Not all players are connected.");
+            return false;
+        }
+
+        ulong localPlayerId = NetworkManager.Singleton.LocalClientId;
+        Side turn = NetworkSideToMove.Value; // Ensure using NetworkVariable
+
+        bool isTurn = (turn == Side.White && localPlayerId == PlayersConnected[0]) ||
+                      (turn == Side.Black && localPlayerId == PlayersConnected[1]);
+
+        Debug.Log($"[GameManager] Player {localPlayerId} turn check: {isTurn}, Turn: {turn}");
+        return isTurn;
+    }
+
+    public void OnClientPlayerConnected(ulong clientId)
+    {
+        PlayersConnected.Add(clientId);
+        UpdatePlayersClientRpc(PlayersConnected.ToArray());
+    }
+
+    private void OnClientPlayerDisconnected(ulong id)
+    {
+        PlayersConnected.Remove(id);
+    }
+
+    [ClientRpc]
+    private void UpdatePlayersClientRpc(ulong[] playerIDs)
+    {
+        PlayersConnected = new List<ulong>(playerIDs);
+    }
+
+    public void AssignRole()
+    {
+        if (IsServer) // Ensure only the server changes the turn
+        {
+            Side nextTurn = NetworkSideToMove.Value == Side.White ? Side.Black : Side.White;
+            NetworkSideToMove.Value = nextTurn; // Server sets the turn first
+
+            Debug.Log($"[GameManager] Server updated turn to {nextTurn}");
+
+            // Notify clients
+            SyncTurnClientRpc(nextTurn);
+        }
+    }
+
+    [ClientRpc]
+    private void SyncTurnClientRpc(Side newTurn)
+    {
+        if (!IsServer)
+        {
+            Debug.Log($"[GameManager] Syncing turn: Now it's {newTurn}'s turn.");
+            return; // Clients should NOT modify NetworkVariable
+        }
+
+        NetworkSideToMove.Value = newTurn; // Ensure only the SERVER modifies this
+    }
+
+    public string SerializeGame()
+    {
+        return JsonConvert.SerializeObject(game);
+    }
+
     public void LoadGame(string serializedGame)
     {
-        game = serializersByType[selectedSerializationType].Deserialize(serializedGame);
+        game = JsonConvert.DeserializeObject<Game>(serializedGame);
         NewGameStartedEvent?.Invoke();
+    }
+
+    /// <summary>
+    /// Determines whether the specified piece has any legal moves.
+    /// </summary>
+    /// <param name="piece">The chess piece to evaluate.</param>
+    /// <returns>True if the piece has at least one legal move; otherwise, false.</returns>
+    public bool HasLegalMoves(Piece piece)
+    {
+        return game.TryGetLegalMovesForPiece(piece, out _);
     }
 
     /// <summary>
@@ -490,118 +480,6 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
     }
 
     /// <summary>
-    /// Attempts to execute a given move in the game.
-    /// </summary>
-    /// <param name="move">The move to execute.</param>
-    /// <returns>True if the move was successfully executed; otherwise, false.</returns>
-    private bool TryExecuteMove(Movement move)
-    {
-        // Attempt to execute the move within the game logic.
-        if (!game.TryExecuteMove(move))
-        {
-            return false;
-        }
-
-        // Retrieve the latest half-move from the timeline.
-        HalfMoveTimeline.TryGetCurrent(out HalfMove latestHalfMove);
-
-        // If the latest move resulted in checkmate or stalemate, disable further moves.
-        if (latestHalfMove.CausedCheckmate || latestHalfMove.CausedStalemate)
-        {
-            BoardManager.Instance.SetActiveAllPieces(false);
-            GameEndedEvent?.Invoke();
-        }
-        else
-        {
-            // Otherwise, ensure that only the pieces of the side to move are enabled.
-            BoardManager.Instance.EnsureOnlyPiecesOfSideAreEnabled(SideToMove);
-        }
-
-        // Signal that a move has been executed.
-        MoveExecutedEvent?.Invoke();
-
-        return true;
-    }
-
-    /// <summary>
-    /// Handles special move behaviour asynchronously (castling, en passant, and promotion).
-    /// </summary>
-    /// <param name="specialMove">The special move to process.</param>
-    /// <returns>A task that resolves to true if the special move was handled; otherwise, false.</returns>
-    private async Task<bool> TryHandleSpecialMoveBehaviourAsync(SpecialMove specialMove)
-    {
-        switch (specialMove)
-        {
-            // Handle castling move.
-            case CastlingMove castlingMove:
-                BoardManager.Instance.CastleRook(castlingMove.RookSquare, castlingMove.GetRookEndSquare());
-                return true;
-            // Handle en passant move.
-            case EnPassantMove enPassantMove:
-                BoardManager.Instance.TryDestroyVisualPiece(enPassantMove.CapturedPawnSquare);
-                return true;
-            // Handle promotion move when no promotion piece has been selected yet.
-            case PromotionMove { PromotionPiece: null } promotionMove:
-                // Activate the promotion UI and disable all pieces.
-                UIManager.Instance.SetActivePromotionUI(true);
-                BoardManager.Instance.SetActiveAllPieces(false);
-
-                // Cancel any pending promotion UI tasks.
-                promotionUITaskCancellationTokenSource?.Cancel();
-                promotionUITaskCancellationTokenSource = new CancellationTokenSource();
-
-                // Await user's promotion choice asynchronously.
-                ElectedPiece choice = await Task.Run(GetUserPromotionPieceChoice, promotionUITaskCancellationTokenSource.Token);
-
-                // Deactivate the promotion UI and re-enable all pieces.
-                UIManager.Instance.SetActivePromotionUI(false);
-                BoardManager.Instance.SetActiveAllPieces(true);
-
-                // If the task was cancelled, return false.
-                if (promotionUITaskCancellationTokenSource == null
-                    || promotionUITaskCancellationTokenSource.Token.IsCancellationRequested
-                ) { return false; }
-
-                // Set the chosen promotion piece.
-                promotionMove.SetPromotionPiece(
-                    PromotionUtil.GeneratePromotionPiece(choice, SideToMove)
-                );
-                // Update the board visuals for the promotion.
-                BoardManager.Instance.TryDestroyVisualPiece(promotionMove.Start);
-                BoardManager.Instance.TryDestroyVisualPiece(promotionMove.End);
-                BoardManager.Instance.CreateAndPlacePieceGO(promotionMove.PromotionPiece, promotionMove.End);
-
-                promotionUITaskCancellationTokenSource = null;
-                return true;
-            // Handle promotion move when the promotion piece is already set.
-            case PromotionMove promotionMove:
-                BoardManager.Instance.TryDestroyVisualPiece(promotionMove.Start);
-                BoardManager.Instance.TryDestroyVisualPiece(promotionMove.End);
-                BoardManager.Instance.CreateAndPlacePieceGO(promotionMove.PromotionPiece, promotionMove.End);
-
-                return true;
-            // Default case: if the special move is not recognised.
-            default:
-                return false;
-        }
-    }
-
-    /// <summary>
-    /// Blocks until the user selects a piece for pawn promotion.
-    /// </summary>
-    /// <returns>The elected promotion piece chosen by the user.</returns>
-    private ElectedPiece GetUserPromotionPieceChoice()
-    {
-        // Wait until the user selects a promotion piece.
-        while (userPromotionChoice == ElectedPiece.None) { }
-
-        ElectedPiece result = userPromotionChoice;
-        // Reset the user promotion choice.
-        userPromotionChoice = ElectedPiece.None;
-        return result;
-    }
-
-    /// <summary>
     /// Allows the user to elect a promotion piece.
     /// </summary>
     /// <param name="choice">The elected promotion piece.</param>
@@ -610,68 +488,31 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
         userPromotionChoice = choice;
     }
 
-    /// <summary>
-    /// Handles the event triggered when a visual chess piece is moved.
-    /// This method validates the move, handles special moves, and updates the board state.
-    /// </summary>
-    /// <param name="movedPieceInitialSquare">The original square of the moved piece.</param>
-    /// <param name="movedPieceTransform">The transform of the moved piece.</param>
-    /// <param name="closestBoardSquareTransform">The transform of the closest board square.</param>
-    /// <param name="promotionPiece">Optional promotion piece (used in pawn promotion).</param>
-    private async void OnPieceMoved(Square movedPieceInitialSquare, Transform movedPieceTransform, Transform closestBoardSquareTransform, Piece promotionPiece = null)
+    public bool IsGameInitialized()
     {
-        // ✅ Restrict movement based on the turn and player role
-        if ((SideToMove == Side.White && !IsClient) || (SideToMove == Side.Black && !IsHost))
-        {
-            Debug.LogWarning("Not your turn!");
-            movedPieceTransform.position = movedPieceTransform.parent.position; // Reset position
-            return;
-        }
-
-        // Determine the destination square based on the name of the closest board square transform.
-        Square endSquare = new Square(closestBoardSquareTransform.name);
-
-        // Attempt to retrieve a legal move from the game logic.
-        if (!game.TryGetLegalMove(movedPieceInitialSquare, endSquare, out Movement move))
-        {
-            // If no legal move is found, reset the piece's position.
-            movedPieceTransform.position = movedPieceTransform.parent.position;
-            return;
-        }
-
-        // If the move is a promotion move, set the promotion piece.
-        if (move is PromotionMove promotionMove)
-        {
-            promotionMove.SetPromotionPiece(promotionPiece);
-        }
-
-        // Execute the move only if allowed.
-        if ((move is not SpecialMove specialMove || await TryHandleSpecialMoveBehaviourAsync(specialMove))
-            && TryExecuteMove(move))
-        {
-            // For non-special moves, update the board visuals by destroying any piece at the destination.
-            if (move is not SpecialMove) { BoardManager.Instance.TryDestroyVisualPiece(move.End); }
-
-            // For promotion moves, update the moved piece transform to the newly created visual piece.
-            if (move is PromotionMove)
-            {
-                movedPieceTransform = BoardManager.Instance.GetPieceGOAtPosition(move.End).transform;
-            }
-
-            // Re-parent the moved piece to the destination square and update its position.
-            movedPieceTransform.parent = closestBoardSquareTransform;
-            movedPieceTransform.position = closestBoardSquareTransform.position;
-        }
+        return game != null && game.BoardTimeline != null;
     }
 
-
-    /// <summary>
-    /// Determines whether the specified piece has any legal moves.
-    /// </summary>
-    /// <param name="piece">The chess piece to evaluate.</param>
-    /// <returns>True if the piece has at least one legal move; otherwise, false.</returns>
-    public bool HasLegalMoves(Piece piece)
+    private bool TryExecuteMove(Movement move)
     {
-        return game.TryGetLegalMovesForPiece(piece, out _);
+        if (!game.TryExecuteMove(move))
+        {
+            return false;
+        }
+
+        HalfMoveTimeline.TryGetCurrent(out HalfMove latestHalfMove);
+
+        if (latestHalfMove.CausedCheckmate || latestHalfMove.CausedStalemate)
+        {
+            BoardManager.Instance.SetActiveAllPieces(false);
+            GameEndedEvent?.Invoke();
+        }
+        else
+        {
+            BoardManager.Instance.EnsureOnlyPiecesOfSideAreEnabled(SideToMove);
+        }
+
+        MoveExecutedEvent?.Invoke();
+        return true;
     }
 }

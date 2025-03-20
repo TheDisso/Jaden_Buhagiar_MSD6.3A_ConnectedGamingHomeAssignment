@@ -5,12 +5,17 @@ namespace UnityChess {
 	/// <summary>An 8x8 matrix representation of a chessboard.</summary>
 	public class Board {
 		private readonly Piece[,] boardMatrix;
-		private readonly Dictionary<Side, Square?> currentKingSquareBySide = new Dictionary<Side, Square?> {
+        /*private readonly Dictionary<Side, Square?> currentKingSquareBySide = new Dictionary<Side, Square?> {
 			[Side.White] = null,
 			[Side.Black] = null
-		};
+		};*/
+        private readonly Dictionary<Side, Square> currentKingSquareBySide = new Dictionary<Side, Square>
+        {
+            [Side.White] = Square.Invalid,
+            [Side.Black] = Square.Invalid
+        };
 
-		public Piece this[Square position] {
+        public Piece this[Square position] {
 			get {
 				if (position.IsValid()) return boardMatrix[position.File - 1, position.Rank - 1];
 				throw new ArgumentOutOfRangeException($"Position was out of range: {position}");
