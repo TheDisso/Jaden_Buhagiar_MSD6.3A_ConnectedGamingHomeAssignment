@@ -45,7 +45,7 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager>
         if (positionMap == null)
             positionMap = new Dictionary<Square, GameObject>();
 
-        allSquaresGO = GameObject.FindGameObjectsWithTag("Square"); // ✅ Now this assignment is valid
+        allSquaresGO = GameObject.FindGameObjectsWithTag("Square"); // Now this assignment is valid
 
         foreach (GameObject squareGO in allSquaresGO)
         {
@@ -162,6 +162,8 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager>
     [ClientRpc]
     private void SyncBoardClientRpc(string serializedData)
     {
+        Debug.Log("[BoardManager] Syncing board data...");
+    Debug.Log($"[BoardManager] Received serialized square data: {serializedData}");
         if (IsServer) return; // Server does not need to sync
 
         try
@@ -301,11 +303,14 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager>
 
         netObj.Spawn(); // Ensure it's spawned before reparenting
 
-        // 🔹 Assign ownership (White -> Player[0], Black -> Player[1])
+        // Ensure correct ownership when spawning pieces
         if (GameManager.Instance.PlayersConnected.Count >= 2)
         {
-            ulong ownerId = (piece.Owner == Side.White) ? GameManager.Instance.PlayersConnected[0] : GameManager.Instance.PlayersConnected[1];
-            netObj.ChangeOwnership(ownerId);
+            ulong ownerId = (piece.Owner == Side.White)
+                ? GameManager.Instance.PlayersConnected[0]  // White player
+                : GameManager.Instance.PlayersConnected[1]; // Black player
+
+            netObj.ChangeOwnership(ownerId); // ✅ Assigns correct ownership
             Debug.Log($"[BoardManager] Assigned {pieceGO.name} to Player {ownerId}");
         }
         else
@@ -372,17 +377,16 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager>
 
     public void GetSquareGOsWithinRadius(List<GameObject> squareGOs, Vector3 positionWS, float radius)
     {
-        if (allSquaresGO.Length == 0)
-        {
-            Debug.LogError("[BoardManager] ERROR: No squares initialized! Ensure squares are pre-placed.");
-            return;
-        }
+        Debug.Log($"[BoardManager] Checking for squares near {positionWS}");
 
         float radiusSqr = radius * radius;
         foreach (GameObject squareGO in allSquaresGO)
         {
             if (squareGO != null && (squareGO.transform.position - positionWS).sqrMagnitude < radiusSqr)
+            {
+                Debug.Log($"[BoardManager] Found nearby square: {squareGO.name}");
                 squareGOs.Add(squareGO);
+            }
         }
     }
 
@@ -434,8 +438,11 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager>
 
         if (pieceGO != null && targetSquare != null)
         {
-            pieceGO.transform.SetParent(targetSquare.transform);
-            pieceGO.transform.localPosition = Vector3.zero;
+            if (IsServer) // ✅ Only the server should move the piece
+            {
+                pieceGO.transform.SetParent(targetSquare.transform);
+                pieceGO.transform.localPosition = Vector3.zero;
+            }
         }
     }
 

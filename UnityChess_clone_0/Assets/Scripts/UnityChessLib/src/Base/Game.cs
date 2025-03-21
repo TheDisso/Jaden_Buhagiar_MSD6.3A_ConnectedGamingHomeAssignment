@@ -67,8 +67,29 @@ namespace UnityChess {
 			       && currentLegalMoves.TryGetValue(movingPiece, out Dictionary<(Square, Square), Movement> movesByStartEndSquares)
 			       && movesByStartEndSquares.TryGetValue((startSquare, endSquare), out move);
 		}
-		
-		public bool TryGetLegalMovesForPiece(Piece movingPiece, out ICollection<Movement> legalMoves) {
+
+        public List<Movement> GetAllLegalMoves()
+        {
+            List<Movement> allMoves = new List<Movement>();
+
+            if (LegalMovesTimeline.TryGetCurrent(out var legalMovesByPiece))
+            {
+                foreach (var pieceMoves in legalMovesByPiece.Values)
+                {
+                    if (pieceMoves == null) continue;
+
+                    foreach (var move in pieceMoves.Values)
+                    {
+                        allMoves.Add(move);
+                    }
+                }
+            }
+
+            return allMoves;
+        }
+
+
+        public bool TryGetLegalMovesForPiece(Piece movingPiece, out ICollection<Movement> legalMoves) {
 			legalMoves = null;
 
 			if (movingPiece != null
