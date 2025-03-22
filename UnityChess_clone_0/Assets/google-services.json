@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "377817387744",
+    "project_id": "jadebuhagiar-cg-ha",
+    "storage_bucket": "jadebuhagiar-cg-ha.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:377817387744:android:931c26caa1424a0552b685",
+        "android_client_info": {
+          "package_name": "com.mcast.connectedgamingha"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyChWASUT5pweuqOAF3ZSsdxXVRalRUIyqc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

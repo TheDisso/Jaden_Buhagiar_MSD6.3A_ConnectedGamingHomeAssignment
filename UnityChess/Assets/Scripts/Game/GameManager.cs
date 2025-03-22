@@ -8,10 +8,6 @@ using UnityChess;
 using UnityEngine;
 using Newtonsoft.Json;
 using static UnityChess.SquareUtil;
-using Unity.Netcode.Components;
-using UnityEngine.UI;
-using TMPro;
-using System.Net.NetworkInformation;
 
 /// <summary>
 /// Manages the overall game state, including game start, moves execution,
@@ -35,11 +31,6 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
 
     private Game game;
 
-    private float lastPingTime;
-    private float lastPingDuration;
-    private float pingTimer;
-    public TextMeshProUGUI pingTxt;
-
     public override void OnNetworkSpawn()
     {
         base.OnNetworkSpawn();
@@ -51,11 +42,6 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
             game = game ?? new Game(); // Ensure game is initialized
             NetworkSideToMove.Value = game.ConditionsTimeline[0].SideToMove;
         }
-
-        NetworkSideToMove.OnValueChanged += (prev, curr) =>
-        {
-            Debug.Log($"[GameManager] Turn changed from {prev} to {curr} for player {NetworkManager.Singleton.LocalClientId}");
-        };
     }
 
     /// <summary>
@@ -193,51 +179,6 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
         }
     }
 
-    private void Update()
-    {
-        pingTimer += Time.deltaTime;
-
-        if (pingTimer >= 2f)
-        {
-            pingTimer = 0f;
-
-            if (IsServer)
-            {
-                float serverPing = NetworkManager.Singleton.IsHost ? 0f :
-                    NetworkManager.Singleton.NetworkConfig.NetworkTransport
-                    .GetCurrentRtt(NetworkManager.Singleton.LocalClientId);
-
-                //Debug.Log($"[Ping] Server RTT: {serverPing:F0} ms");
-
-                if (pingTxt != null)
-                    pingTxt.text = $"Server Ping: {serverPing:F0} ms";
-            }
-            else if (!IsServer) // Client
-            {
-                lastPingTime = Time.time;
-                PingServerRpc(Time.time);
-            }
-        }
-    }
-
-    [ServerRpc(RequireOwnership = false)]
-    private void PingServerRpc(float clientTime, ServerRpcParams rpcParams = default)
-    {
-        // Immediately send back to client
-        PongClientRpc(clientTime);
-    }
-
-    [ClientRpc]
-    private void PongClientRpc(float clientTime)
-    {
-        float roundTripTime = (Time.time - clientTime) * 1000f; // in milliseconds
-        lastPingDuration = roundTripTime;
-        //Debug.Log($"[Ping] RTT: {roundTripTime:F2} ms");
-
-        if (pingTxt != null)
-            pingTxt.text = $"Ping: {roundTripTime:F0} ms";
-    }
-
     /// <summary>
     /// Executes a move on the server and sends updates to clients.
     /// </summary>
@@ -246,43 +187,16 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
         Square startSquare = new Square(fromFile, fromRank);
         Square endSquare = new Square(toFile, toRank);
 
-        Debug.Log($"[GameManager] Attempting to move from {startSquare} to {endSquare}");
-
-        // Log all pieces on the board before making a move
-        Debug.Log("[GameManager] Current board state:");
-        foreach (var (square, piece) in CurrentPieces)
-        {
-            Debug.Log($"Piece {piece} at {square}");
-        }
-
-        // 🔹 Log ALL legal moves before rejecting
-        Debug.Log("[GameManager] Checking legal moves before executing...");
-        foreach (var legalMmove in game.GetAllLegalMoves())
-        {
-            Debug.Log($"[GameManager] Legal move: {legalMmove.Start} -> {legalMmove.End}");
-        }
-
-        // 🔹 Check if the attempted move is valid
         if (!game.TryGetLegalMove(startSquare, endSquare, out Movement move))
         {
-            Debug.LogWarning($"[GameManager] Illegal move attempted! Start: {startSquare}, End: {endSquare}");
+            Debug.LogWarning("[GameManager] Illegal move attempted!");
             return;
         }
 
-        // 🔹 Extra Debug: Verify Turn Switching Before Moving
-        Debug.Log($"[GameManager] Valid move detected. Executing {startSquare} -> {endSquare} for {NetworkSideToMove.Value}");
-
-        // Execute the move
         if (TryExecuteMove(move))
         {
-            Debug.Log($"[GameManager] Move executed successfully: {startSquare} -> {endSquare}");
-
-            // ✅ Inform all clients of the move
             ApplyMoveClientRpc(JsonConvert.SerializeObject(move));
-
-            // ✅ Switch to the next turn
-            AssignRole();
-            Debug.Log($"[GameManager] Turn now set to: {NetworkSideToMove.Value}");
+            AssignRole(); // <-- Ensure role assignment after move execution
         }
     }
 
@@ -375,7 +289,7 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
     {
         ulong localPlayerId = NetworkManager.Singleton.LocalClientId;
 
-        if (!IsPlayerTurn(NetworkManager.Singleton.LocalClientId))
+        if (!IsPlayerTurn())
         {
             Debug.LogWarning($"[GameManager] Player {localPlayerId} tried moving but it's not their turn!");
             return;
@@ -444,43 +358,44 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
 
     /// 🔹 **NEW**: Client RPC to update all players
     [ClientRpc]
-    private void MovePieceOnClientsClientRpc(int fromFile, int fromRank, int toFile, int toRank, NetworkObjectReference pieceRef)
+    private void MovePieceOnClientsClientRpc(int movePieceInitSquareFile, int movePieceInitSquareRank, int squareFile, int squareRank, NetworkObjectReference pieceRef)
     {
-        if (IsServer) return; // Server already moved it
+        Square movePieceInitSquare = new Square(movePieceInitSquareFile, movePieceInitSquareRank);
+        Square endSquare = new Square(squareFile, squareRank);
 
         if (pieceRef.TryGet(out NetworkObject pieceNetObj))
         {
             Transform pieceTransform = pieceNetObj.transform;
-            GameObject targetSquareGO = BoardManager.Instance.GetSquareGOByPosition(new Square(toFile, toRank));
+            GameObject targetSquareGO = BoardManager.Instance.GetSquareGOByPosition(endSquare);
 
             if (targetSquareGO != null)
             {
-                Debug.Log($"[GameManager] Client {NetworkManager.Singleton.LocalClientId} moving piece from ({fromFile}, {fromRank}) to ({toFile}, {toRank})");
-
+                pieceTransform.SetParent(targetSquareGO.transform);
                 pieceTransform.position = targetSquareGO.transform.position;
-
-                // ✅ If NetworkTransform exists, force sync
-                NetworkTransform netTransform = pieceTransform.GetComponent<NetworkTransform>();
-                if (netTransform != null)
-                {
-                    netTransform.Teleport(pieceTransform.position, pieceTransform.rotation, pieceTransform.localScale);
-                }
+                Debug.Log($"[BoardManager] Successfully moved piece on client to {endSquare}");
             }
             else
             {
-                Debug.LogError($"[GameManager] ERROR: Could not find target square {toFile}, {toRank}");
+                Debug.LogError($"[BoardManager] ERROR: Could not find target square {endSquare}");
             }
         }
     }
 
-    public bool IsPlayerTurn(ulong clientId)
+    public bool IsPlayerTurn()
     {
-        Side turn = NetworkSideToMove.Value;
+        if (PlayersConnected.Count != 2)
+        {
+            Debug.LogWarning($"[GameManager] Not all players are connected.");
+            return false;
+        }
 
-        bool isTurn = (turn == Side.White && clientId == PlayersConnected[0]) ||
-                      (turn == Side.Black && clientId == PlayersConnected[1]);
+        ulong localPlayerId = NetworkManager.Singleton.LocalClientId;
+        Side turn = NetworkSideToMove.Value; // Ensure using NetworkVariable
 
-        Debug.Log($"[GameManager] Player {clientId} turn check: {isTurn}, Turn: {turn}");
+        bool isTurn = (turn == Side.White && localPlayerId == PlayersConnected[0]) ||
+                      (turn == Side.Black && localPlayerId == PlayersConnected[1]);
+
+        Debug.Log($"[GameManager] Player {localPlayerId} turn check: {isTurn}, Turn: {turn}");
         return isTurn;
     }
 

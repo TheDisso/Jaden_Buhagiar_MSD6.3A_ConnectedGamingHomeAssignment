@@ -66,8 +66,7 @@ public class VisualPiece : NetworkBehaviour
             return;
         }
 
-        if (!GameManager.Instance.IsPlayerTurn(NetworkManager.Singleton.LocalClientId) || PieceColor != GameManager.Instance.SideToMove)
-
+        if (!GameManager.Instance.IsPlayerTurn() || PieceColor != GameManager.Instance.SideToMove)
         {
             Debug.LogWarning($"[VisualPiece] Player {NetworkManager.Singleton.LocalClientId} attempted to move {PieceColor}, but it's not their turn!");
             return;
@@ -82,39 +81,19 @@ public class VisualPiece : NetworkBehaviour
 
     private void OnMouseDrag()
     {
-        if (!IsOwner)
-        {
-            Debug.LogWarning($"[VisualPiece] {gameObject.name} drag blocked: not the owner.");
-            return;
-        }
-
-        if (!GameManager.Instance.IsPlayerTurn(NetworkManager.Singleton.LocalClientId))
-        {
-            Debug.LogWarning($"[VisualPiece] {gameObject.name} drag blocked: not player's turn.");
-            return;
-        }
-
-        if (PieceColor != GameManager.Instance.SideToMove)
-        {
-            Debug.LogWarning($"[VisualPiece] {gameObject.name} drag blocked: wrong color. It's {GameManager.Instance.SideToMove}'s turn.");
-            return;
-        }
+        if (!GameManager.Instance.IsPlayerTurn()) return;
+        if (PieceColor != GameManager.Instance.SideToMove) return;
 
         if (enabled)
         {
             Vector3 nextPiecePositionSS = new Vector3(Input.mousePosition.x, Input.mousePosition.y, piecePositionSS.z);
-            Vector3 newWorldPosition = boardCamera.ScreenToWorldPoint(nextPiecePositionSS);
-            thisTransform.position = newWorldPosition;
-
-            Debug.Log($"[VisualPiece] {gameObject.name} dragged by Player {NetworkManager.Singleton.LocalClientId} to {newWorldPosition}");
+            thisTransform.position = boardCamera.ScreenToWorldPoint(nextPiecePositionSS);
         }
     }
 
     public void OnMouseUp()
     {
-        if (!IsOwner) return; // Prevents client from moving directly
-
-        if (!GameManager.Instance.IsPlayerTurn(NetworkManager.Singleton.LocalClientId) || PieceColor != GameManager.Instance.SideToMove)
+        if (!GameManager.Instance.IsPlayerTurn() || PieceColor != GameManager.Instance.SideToMove)
         {
             return;
         }
@@ -143,18 +122,19 @@ public class VisualPiece : NetworkBehaviour
             }
         }
 
-        // ✅ Instead of moving the piece directly, request the server to do it
-        Movement move = new Movement(CurrentSquare, SquareUtil.StringToSquare(closestSquareTransform.name));
+        // Serialize the movement object
+        Movement move = new Movement(CurrentSquare, StringToSquare(closestSquareTransform.name));
         string moveJson = move.ToJson();
 
-        RequestMoveServerRpc(moveJson); // 🔥 Send to server
+        // Instead of directly moving, send move request to the server
+        RequestMoveServerRpc(moveJson);
     }
 
     /// <summary>
     /// Sends move request to server as JSON string.
     /// </summary>
     [ServerRpc(RequireOwnership = false)]
-    private void RequestMoveServerRpc(string moveJson, ServerRpcParams rpcParams = default)
+    private void RequestMoveServerRpc(string moveJson)
     {
         try
         {
@@ -166,17 +146,7 @@ public class VisualPiece : NetworkBehaviour
                 return;
             }
 
-            ulong requestingClientId = rpcParams.Receive.SenderClientId;
-
-            ulong clientId = rpcParams.Receive.SenderClientId;
-
-            if (!GameManager.Instance.IsPlayerTurn(clientId) || GameManager.Instance.SideToMove != PieceColor)
-            {
-                Debug.LogWarning($"[VisualPiece] Player {requestingClientId} attempted to move {PieceColor}, but it's not their turn!");
-                return;
-            }
-
-            Debug.Log($"[VisualPiece] Received move request from {requestingClientId}: {move.Start} -> {move.End}");
+            Debug.Log($"[VisualPiece] Received move request: {move.Start} -> {move.End}");
 
             GameManager.Instance.ExecuteMove(move.Start.File, move.Start.Rank, move.End.File, move.End.Rank);
         }
