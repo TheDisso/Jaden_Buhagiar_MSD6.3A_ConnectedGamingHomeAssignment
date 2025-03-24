@@ -10,14 +10,16 @@ using Unity.Netcode;
 using UnityEngine.Networking;
 using System.Collections.Generic;
 
-public class FirebaseManager : MonoBehaviour
+public class FirebaseManager : NetworkBehaviour
 {
     private FirebaseFirestore db;
+    private ListenerRegistration purchaseListener;
 
     public Image profileImage; // Assign in Unity Editor
     public TextMeshProUGUI coinsText; // Assign in Unity Editor
-
     public string userID = "0"; // This should be dynamically set per user
+    public TextMeshProUGUI purchaseNotifText;
+    //public string userID;
 
     private void Awake()
     {
@@ -25,12 +27,26 @@ public class FirebaseManager : MonoBehaviour
         db = FirebaseFirestore.DefaultInstance;
     }
 
-    void Start()
+    public override void OnNetworkSpawn()
     {
-        InitializeFirebase();
+        Debug.Log($"[FirebaseManager] OnNetworkSpawn called on client {NetworkManager.Singleton.LocalClientId}");
     }
 
-    void InitializeFirebase()
+    private void Start()
+    {
+        InitializeFirebase();
+
+        StartPurchaseListener();
+    }
+
+
+    private void OnDestroy()
+    {
+        // Stop listening when the object is destroyed
+        purchaseListener?.Stop();
+    }
+
+    private void InitializeFirebase()
     {
         FirebaseApp.CheckAndFixDependenciesAsync().ContinueWithOnMainThread(task =>
         {
@@ -207,11 +223,19 @@ public class FirebaseManager : MonoBehaviour
         return System.IO.Path.Combine(Application.persistentDataPath, $"{userID}_profile.png");
     }
 
-    [ClientRpc] // Notifies ALL players in the game
-    private void NotifyUsersOfPurchaseClientRpc(string imageUrl)
+    /*[ServerRpc(RequireOwnership = false)]
+    public void NotifyAllClientsSkinUsedServerRpc(string imageUrl)
     {
-        Debug.Log($"[DLCStore] A player has purchased a new profile picture: {imageUrl}");
+        Debug.Log($"[FirebaseManager] ServerRpc called with imageUrl: {imageUrl}");
+        NotifyAllClientsSkinUsedClientRpc(imageUrl);
     }
+
+    [ClientRpc]
+    private void NotifyAllClientsSkinUsedClientRpc(string imageUrl)
+    {
+        Debug.Log($"[FirebaseManager] A player has equipped a new profile image: {imageUrl}");
+        // Here you can also trigger avatar update, UI update, etc.
+    }*/
 
     public void TryPurchaseItem(int cost, System.Action<bool> onComplete = null)
     {
@@ -290,16 +314,7 @@ public class FirebaseManager : MonoBehaviour
 
     public void AddImageToOwnedList(string imageUrl)
     {
-        FirebaseAuth auth = FirebaseAuth.DefaultInstance;
-        FirebaseUser user = auth.CurrentUser;
-
-        if (user == null)
-        {
-            Debug.LogError("[FirebaseManager] No authenticated user found.");
-            return;
-        }
-
-        DocumentReference userDoc = db.Collection("Users").Document(user.UserId);
+        DocumentReference userDoc = db.Collection("Users").Document(userID); // use manual userID
         userDoc.UpdateAsync("ownedImages", FieldValue.ArrayUnion(imageUrl)).ContinueWithOnMainThread(task =>
         {
             if (task.IsCompleted)
@@ -330,6 +345,79 @@ public class FirebaseManager : MonoBehaviour
 
             onComplete?.Invoke(owned);
         });
+    }
+
+    /// <summary>
+    /// Sets up a listener on StoreEvents/latestPurchase. 
+    /// Whenever that doc changes, all listening clients get a callback in real time.
+    /// </summary>
+    private void StartPurchaseListener()
+    {
+        DocumentReference docRef = db.Collection("DlcStoreEvents").Document("latestPurchase");
+
+        // Listen for changes on that document
+        purchaseListener = docRef.Listen(snapshot =>
+        {
+            if (snapshot.Exists)
+            {
+                if (snapshot.TryGetValue<string>("imageUrl", out string purchasedImageUrl))
+                {
+                    Debug.Log($"[FirebaseManager] Purchase event detected! A new image was purchased: {purchasedImageUrl}");
+
+                    if (snapshot.TryGetValue<string>("purchasedBy", out string purchaserId))
+                    {
+                        Debug.Log($"[FirebaseManager] purchasedBy user: {purchaserId}");
+                        ShowPurchaseNotification($"USER {purchaserId} HAS PURCHASED A PROFILE PICTURE SKIN", 2f);
+                    }
+                    else
+                    {
+                        ShowPurchaseNotification("A PROFILE PICTURE SKIN HAS BEEN PURCHASED", 2f);
+                    }
+                }
+            }
+            else
+            {
+                Debug.Log("[FirebaseManager] No data in latestPurchase document yet.");
+            }
+        });
+    }
+
+    /// <summary>
+    /// Call this from your purchase logic to update the Firestore doc 
+    /// and notify all listening clients.
+    /// </summary>
+    public void UpdateLatestPurchaseInFirestore(string imageUrl, string purchasedByUserId)
+    {
+        DocumentReference docRef = db.Collection("DlcStoreEvents").Document("latestPurchase");
+        docRef.SetAsync(new Dictionary<string, object>
+        {
+            { "imageUrl", imageUrl },
+            { "purchasedBy", purchasedByUserId },
+            { "timestamp", FieldValue.ServerTimestamp }
+        }).ContinueWithOnMainThread(task =>
+        {
+            if (!task.IsFaulted && !task.IsCanceled)
+            {
+                Debug.Log("[FirebaseManager] Successfully updated latestPurchase doc in Firestore.");
+            }
+            else
+            {
+                Debug.LogError("[FirebaseManager] Failed to update latestPurchase doc.");
+            }
+        });
+    }
+
+    public void ShowPurchaseNotification(string message, float duration = 2f)
+    {
+        StartCoroutine(ShowPurchaseNotificationRoutine(message, duration));
+    }
+
+    private IEnumerator ShowPurchaseNotificationRoutine(string message, float duration)
+    {
+        purchaseNotifText.text = message;
+        purchaseNotifText.gameObject.SetActive(true);
+        yield return new WaitForSeconds(duration);
+        purchaseNotifText.gameObject.SetActive(false);
     }
 
 }

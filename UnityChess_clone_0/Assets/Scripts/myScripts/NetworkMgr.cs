@@ -5,11 +5,15 @@ using UnityEngine;
 
 public class NetworkMgr : NetworkBehaviourSingleton<NetworkMgr>
 {
+    public FirebaseManager firebaseManager;
+
     public void StartHost()
     {
         if (!NetworkManager.Singleton.IsHost && !NetworkManager.Singleton.IsClient)
         {
+            //firebaseManager.SetUserID("0");
             NetworkManager.Singleton.StartHost();
+            UnityAnalyticsManager.Instance.LogHostStarted();
             Debug.Log("[NetworkMgr] Host started.");
         }
         else
@@ -22,7 +26,9 @@ public class NetworkMgr : NetworkBehaviourSingleton<NetworkMgr>
     {
         if (!NetworkManager.Singleton.IsClient && !NetworkManager.Singleton.IsHost)
         {
+            //firebaseManager.SetUserID("1");
             NetworkManager.Singleton.StartClient();
+            UnityAnalyticsManager.Instance.LogClientStarted();
             Debug.Log("[NetworkMgr] Client started.");
         }
         else

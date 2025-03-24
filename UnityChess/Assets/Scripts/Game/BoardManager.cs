@@ -30,7 +30,7 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager>
             GameManager.GameResetToHalfMoveEvent += OnGameResetToHalfMove;
         }
 
-        // 🔹 Ensure positionMap is initialized with the pre-placed board squares
+        // Ensure positionMap is initialized with the pre-placed board squares
         InitializePreplacedSquares();
 
         if (IsServer && GameManager.Instance != null && GameManager.Instance.CurrentPieces.Count > 0)
@@ -45,7 +45,7 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager>
         if (positionMap == null)
             positionMap = new Dictionary<Square, GameObject>();
 
-        allSquaresGO = GameObject.FindGameObjectsWithTag("Square"); // ✅ Now this assignment is valid
+        allSquaresGO = GameObject.FindGameObjectsWithTag("Square"); // Now this assignment is valid
 
         foreach (GameObject squareGO in allSquaresGO)
         {
@@ -64,7 +64,7 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager>
     }
 
     /// <summary>
-    /// ✅ Maps the pre-placed board squares to `positionMap`
+    /// Maps the pre-placed board squares to `positionMap`
     /// </summary>
     private void InitializePrePlacedBoard()
     {

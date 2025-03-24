@@ -9,7 +9,7 @@ using UnityEngine.Networking;
 using System.Linq;
 using Unity.Netcode;
 
-public class DlcStoreManager : MonoBehaviour
+public class DlcStoreManager : NetworkBehaviour
 {
     private Button lastLockedButton = null;
     private TextMeshProUGUI lastLockedButtonText = null;
@@ -27,6 +27,11 @@ public class DlcStoreManager : MonoBehaviour
         db = FirebaseFirestore.DefaultInstance;
         //dlcStorePanel.SetActive(false); // Hide store initially
         LoadProfilePictureOptions();
+    }
+
+    public override void OnNetworkSpawn()
+    {
+        Debug.Log($"[DlcStoreManager] OnNetworkSpawn called on client {NetworkManager.Singleton.LocalClientId}");
     }
 
     private void Update()
@@ -74,36 +79,41 @@ public class DlcStoreManager : MonoBehaviour
                     if (ownedImages.Contains(imageUrl))
                     {
                         selectButton.interactable = true;
-                        buttonText.text = "Select";
+                        buttonText.text = "SELECT";
                     }
                     else
                     {
                         selectButton.interactable = true;
-                        buttonText.text = "Buy";
+                        buttonText.text = "BUY - 20 COINS";
                     }
 
                     // Unified Click Handler
                     selectButton.onClick.AddListener(() =>
                     {
+                        Debug.Log($"[DLCStore] Button clicked for imageUrl={imageUrl}");
                         if (ownedImages.Contains(imageUrl))
                         {
                             // Already owned — FREE reselect
                             firebaseManager.SetUserProfileImage(imageUrl);
+                            //RequestPurchaseServerRpc(imageUrl, false);
+                            firebaseManager.UpdateLatestPurchaseInFirestore(imageUrl, firebaseManager.userID);
 
                             if (lastLockedButton != null)
                             {
                                 lastLockedButton.interactable = true;
                                 if (lastLockedButtonText != null)
-                                    lastLockedButtonText.text = "Select";
+                                    lastLockedButtonText.text = "SELECT";
                             }
 
                             selectButton.interactable = false;
-                            buttonText.text = "Locked";
+                            buttonText.text = "EQUIPPED";
 
                             lastLockedButton = selectButton;
                             lastLockedButtonText = buttonText;
 
-                            NotifyAllPlayersClientRpc(imageUrl);
+                            UnityAnalyticsManager.Instance.LogDlcPurchase(imageUrl);
+                            //NotifyAllPlayersClientRpc(imageUrl);
+                            //firebaseManager.NotifyAllClientsSkinUsedServerRpc(imageUrl);
                         }
                         else
                         {
@@ -114,22 +124,26 @@ public class DlcStoreManager : MonoBehaviour
                                 {
                                     firebaseManager.SetUserProfileImage(imageUrl);
                                     firebaseManager.AddImageToOwnedList(imageUrl);
+                                    firebaseManager.UpdateLatestPurchaseInFirestore(imageUrl, firebaseManager.userID);
                                     ownedImages.Add(imageUrl); // So future clicks are free
+                                    //RequestPurchaseServerRpc(imageUrl, true);
 
                                     if (lastLockedButton != null)
                                     {
                                         lastLockedButton.interactable = true;
                                         if (lastLockedButtonText != null)
-                                            lastLockedButtonText.text = "Select";
+                                            lastLockedButtonText.text = "SELECT";
                                     }
 
                                     selectButton.interactable = false;
-                                    buttonText.text = "Locked";
+                                    buttonText.text = "EQUIPPED";
 
                                     lastLockedButton = selectButton;
                                     lastLockedButtonText = buttonText;
 
-                                    NotifyAllPlayersClientRpc(imageUrl);
+                                    UnityAnalyticsManager.Instance.LogDlcPurchase(imageUrl);
+                                    //NotifyAllPlayersClientRpc(imageUrl);
+                                    //firebaseManager.NotifyAllClientsSkinUsedServerRpc(imageUrl);
                                 }
                                 else
                                 {
@@ -164,9 +178,42 @@ public class DlcStoreManager : MonoBehaviour
         }
     }
 
-    [ClientRpc] // Notifies ALL players in the game
+    /*
+    [ServerRpc(RequireOwnership = false)]
+    private void RequestPurchaseServerRpc(string imageUrl, bool wasBuy)
+    {
+        // This code is now running on the HOST/Server instance of DlcStoreManager.
+        Debug.Log($"[DlcStoreManager] ServerRpc received. wasBuy={wasBuy}, imageUrl={imageUrl}");
+
+        // 1. Host performs the logic that was previously done client-side:
+        if (wasBuy)
+        {
+            // Mark image as owned, apply to user, etc.
+            // (Though you might prefer to keep the 'TryPurchaseItem' logic server-side as well.)
+            firebaseManager.SetUserProfileImage(imageUrl);
+            firebaseManager.AddImageToOwnedList(imageUrl);
+
+            firebaseManager.UpdateLatestPurchaseInFirestore(imageUrl, firebaseManager.userID);
+        }
+        else
+        {
+            // If already owned, just do the "equip" logic.
+            firebaseManager.SetUserProfileImage(imageUrl);
+            firebaseManager.UpdateLatestPurchaseInFirestore(imageUrl, firebaseManager.userID);
+        }
+
+        // 2. Now that the server has updated the user’s data, broadcast to ALL clients.
+        NotifyAllPlayersClientRpc(imageUrl);
+        firebaseManager.NotifyAllClientsSkinUsedServerRpc(imageUrl);
+        // ^ firebaseManager also has a ServerRpc->ClientRpc chain. That’s fine, 
+        //   though you could fold it all into one place if you prefer.
+    }
+
+    [ClientRpc]
     private void NotifyAllPlayersClientRpc(string imageUrl)
     {
-        Debug.Log($"[DLCStore] A player has purchased a new profile picture: {imageUrl}");
-    }
+        Debug.Log($"[DlcStoreManager] ClientRpc received on client {NetworkManager.Singleton.LocalClientId}: " +
+                  $"A player purchased/equipped new profile image: {imageUrl}");
+        // Update local UI if needed
+    }*/
 }

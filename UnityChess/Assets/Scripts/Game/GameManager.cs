@@ -8,6 +8,7 @@ using UnityChess;
 using UnityEngine;
 using Newtonsoft.Json;
 using static UnityChess.SquareUtil;
+using TMPro;
 
 /// <summary>
 /// Manages the overall game state, including game start, moves execution,
@@ -31,6 +32,11 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
 
     private Game game;
 
+    private float lastPingTime;
+    private float lastPingDuration;
+    private float pingTimer;
+    public TextMeshProUGUI pingTxt; // UI element to display ping
+
     public override void OnNetworkSpawn()
     {
         base.OnNetworkSpawn();
@@ -44,13 +50,25 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
         }
     }
 
-    /// <summary>
-    /// Returns the current board state.
-    /// </summary>
+    private void Awake()
+    {
+        // Ensure the game is created as soon as the GameManager is loaded
+        if (game == null)
+        {
+            game = new Game();
+            Debug.Log("[GameManager] Game initialized in Awake.");
+        }
+    }
+
     public Board CurrentBoard
     {
         get
         {
+            if (game == null)
+            {
+                Debug.LogError("GameManager.CurrentBoard: game is null!");
+                return null;
+            }
             game.BoardTimeline.TryGetCurrent(out Board currentBoard);
             return currentBoard;
         }
@@ -136,11 +154,17 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
         get
         {
             List<(Square, Piece)> currentPieces = new List<(Square, Piece)>();
+            Board board = CurrentBoard;
+            if (board == null)
+            {
+                Debug.LogError("GameManager.CurrentPieces: CurrentBoard is null!");
+                return currentPieces;
+            }
             for (int file = 1; file <= 8; file++)
             {
                 for (int rank = 1; rank <= 8; rank++)
                 {
-                    Piece piece = CurrentBoard[file, rank];
+                    Piece piece = board[file, rank];
                     if (piece != null)
                         currentPieces.Add((new Square(file, rank), piece));
                 }
@@ -175,8 +199,51 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
         if (IsServer)
         {
             game = new Game();
+            UnityAnalyticsManager.Instance.LogMatchStarted();
             NewGameStartedEvent?.Invoke();
         }
+    }
+
+    private void Update()
+    {
+        pingTimer += Time.deltaTime;
+
+        if (pingTimer >= 2f) // Check every 2 seconds
+        {
+            pingTimer = 0f;
+
+            if (IsServer)
+            {
+                float serverPing = NetworkManager.Singleton.IsHost ? 0f :
+                    NetworkManager.Singleton.NetworkConfig.NetworkTransport
+                    .GetCurrentRtt(NetworkManager.Singleton.LocalClientId);
+
+                if (pingTxt != null)
+                    pingTxt.text = $"Server Ping: {serverPing:F0} ms";
+            }
+            else if (!IsServer) // Client
+            {
+                lastPingTime = Time.time;
+                PingServerRpc(Time.time); // Ask server for ping response
+            }
+        }
+    }
+
+    [ServerRpc(RequireOwnership = false)]
+    private void PingServerRpc(float clientTime, ServerRpcParams rpcParams = default)
+    {
+        // Immediately respond back to client
+        PongClientRpc(clientTime);
+    }
+
+    [ClientRpc]
+    private void PongClientRpc(float clientTime)
+    {
+        float roundTripTime = (Time.time - clientTime) * 1000f; // in ms
+        lastPingDuration = roundTripTime;
+
+        if (pingTxt != null)
+            pingTxt.text = $"Ping: {roundTripTime:F0} ms";
     }
 
     /// <summary>
@@ -502,8 +569,15 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
 
         HalfMoveTimeline.TryGetCurrent(out HalfMove latestHalfMove);
 
-        if (latestHalfMove.CausedCheckmate || latestHalfMove.CausedStalemate)
+        if (latestHalfMove.CausedCheckmate)
         {
+            UnityAnalyticsManager.Instance.LogMatchEnded("checkmate");
+            BoardManager.Instance.SetActiveAllPieces(false);
+            GameEndedEvent?.Invoke();
+        }
+        else if (latestHalfMove.CausedStalemate)
+        {
+            UnityAnalyticsManager.Instance.LogMatchEnded("stalemate");
             BoardManager.Instance.SetActiveAllPieces(false);
             GameEndedEvent?.Invoke();
         }
