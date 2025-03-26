@@ -1,9 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
+using Newtonsoft.Json;
 
 namespace UnityChess {
 	public struct HalfMove {
-		public readonly Piece Piece;
+        //[JsonConverter(typeof(JsonPieceConverter))]
+        public readonly Piece Piece;
 		public readonly Movement Move;
 		public readonly bool CapturedPiece;
 		public readonly bool CausedCheck;

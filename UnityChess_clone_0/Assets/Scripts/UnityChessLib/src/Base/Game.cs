@@ -1,12 +1,15 @@
 ﻿using System.Collections.Generic;
+using Newtonsoft.Json;
 
 namespace UnityChess {
 	/// <summary>Representation of a standard chess game including a history of moves made.</summary>
 	public class Game {
 		public Timeline<GameConditions> ConditionsTimeline { get; }
 		public Timeline<Board> BoardTimeline { get; }
-		public Timeline<HalfMove> HalfMoveTimeline { get; }
-		public Timeline<Dictionary<Piece, Dictionary<(Square, Square), Movement>>> LegalMovesTimeline { get; }
+        [JsonIgnore]
+        public Timeline<HalfMove> HalfMoveTimeline { get; }
+        [JsonIgnore]
+        public Timeline<Dictionary<Piece, Dictionary<(Square, Square), Movement>>> LegalMovesTimeline { get; }
 
 		/// <summary>Creates a Game instance of a given mode with a standard starting Board.</summary>
 		public Game() : this(GameConditions.NormalStartingConditions, Board.StartingPositionPieces) { }

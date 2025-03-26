@@ -1,4 +1,5 @@
 ﻿using System;
+using System.IO;
 using System.Collections;
 using System.Collections.Generic;
 using System.Threading;
@@ -262,7 +263,7 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
 
         if (TryExecuteMove(move))
         {
-            ApplyMoveClientRpc(JsonConvert.SerializeObject(move));
+            //ApplyMoveClientRpc(JsonConvert.SerializeObject(move));
             AssignRole(); // <-- Ensure role assignment after move execution
         }
     }
@@ -270,12 +271,12 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
     /// <summary>
     /// Sends move updates to all clients.
     /// </summary>
-    [ClientRpc]
+    /*[ClientRpc]
     private void ApplyMoveClientRpc(string moveJson)
     {
         Movement move = JsonConvert.DeserializeObject<Movement>(moveJson);
         BoardManager.Instance.MovePieceOnClient(move.Start.File, move.Start.Rank, move.End.File, move.End.Rank);
-    }
+    }*/
 
     /// <summary>
     /// Blocks until the user selects a piece for pawn promotion.
@@ -392,39 +393,77 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
             int squareFile = endSquare.File;
             int squareRank = endSquare.Rank;
 
+            if (!NetworkManager.Singleton.IsConnectedClient)
+            {
+                Debug.LogWarning("[GameManager] Cannot send move RPC: client not fully connected.");
+                return;
+            }
+
             // Request the server to move the piece
             RequestMovePieceServerRpc(movePieceInitSquareFile, movePieceInitSquareRank, squareFile, squareRank, movedPieceTransform.GetComponent<NetworkObject>());
         }
     }
 
-    /// 🔹 **NEW**: Server RPC to process the move
     [ServerRpc(RequireOwnership = false)]
-    private void RequestMovePieceServerRpc(int movePieceInitSquareFile, int movePieceInitSquareRank, int squareFile, int squareRank, NetworkObjectReference pieceRef)
+    private void RequestMovePieceServerRpc(int fromFile, int fromRank, int toFile, int toRank, NetworkObjectReference pieceRef)
     {
-        Square movePieceInitSquare = new Square(movePieceInitSquareFile, movePieceInitSquareRank);
-        Square endSquare = new Square(squareFile, squareRank);
+        // 1) Validate the move
+        Square startSquare = new Square(fromFile, fromRank);
+        Square endSquare = new Square(toFile, toRank);
 
-        if (!game.TryGetLegalMove(movePieceInitSquare, endSquare, out Movement move))
+        if (!game.TryGetLegalMove(startSquare, endSquare, out Movement move))
         {
-            Debug.LogWarning($"[GameManager] Server: Illegal move attempted from {movePieceInitSquare} to {endSquare}");
+            Debug.LogWarning($"[GameManager] Server: Illegal move attempted from {startSquare} to {endSquare}");
             return;
         }
 
-        // ✅ Server updates game state
+        // 2) Execute the move in your game logic
         if (TryExecuteMove(move))
         {
-            if (move is not SpecialMove)
-            {
-                BoardManager.Instance.TryDestroyVisualPiece(move.End);
-            }
+            // If needed, do any special logic like capturing, check for checkmate, etc.
 
-            // ✅ Server instructs all clients to move the piece
-            MovePieceOnClientsClientRpc(movePieceInitSquareFile, movePieceInitSquareRank, squareFile, squareRank, pieceRef);
+            // 3) Now re‐parent on the server
+            if (pieceRef.TryGet(out NetworkObject pieceNetObj))
+            {
+                GameObject targetSquareGO = BoardManager.Instance.GetSquareGOByPosition(endSquare);
+                if (targetSquareGO != null)
+                {
+                    // Only the server can call ChangeParent successfully
+                    pieceNetObj.TrySetParent(targetSquareGO.transform, true);
+                    Debug.Log($"[GameManager] Server re‐parented piece to {endSquare}");
+
+                    UpdatePiecePositionClientRpc(pieceRef, endSquare.ToString());
+                }
+                else
+                {
+                    Debug.LogError($"[GameManager] ERROR: Could not find target square {endSquare}");
+                }
+            }
         }
     }
 
-    /// 🔹 **NEW**: Client RPC to update all players
     [ClientRpc]
+    private void UpdatePiecePositionClientRpc(NetworkObjectReference pieceRef, string squareName)
+    {
+        // Convert the square name back to a Square.
+        Square endSquare = SquareUtil.StringToSquare(squareName);
+        GameObject targetSquareGO = BoardManager.Instance.GetSquareGOByPosition(endSquare);
+
+        if (pieceRef.TryGet(out NetworkObject pieceNetObj) && targetSquareGO != null)
+        {
+            // Update the parent and snap to square
+            pieceNetObj.gameObject.transform.SetParent(targetSquareGO.transform);
+            pieceNetObj.gameObject.transform.localPosition = Vector3.zero;
+            Debug.Log($"[GameManager] Client updated piece position to {squareName}");
+        }
+        else
+        {
+            Debug.LogError("[GameManager] UpdatePiecePositionClientRpc failed to retrieve piece or square.");
+        }
+    }
+
+    /// Client RPC to update all players
+    /*[ClientRpc]
     private void MovePieceOnClientsClientRpc(int movePieceInitSquareFile, int movePieceInitSquareRank, int squareFile, int squareRank, NetworkObjectReference pieceRef)
     {
         Square movePieceInitSquare = new Square(movePieceInitSquareFile, movePieceInitSquareRank);
@@ -446,7 +485,7 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
                 Debug.LogError($"[BoardManager] ERROR: Could not find target square {endSquare}");
             }
         }
-    }
+    }*/
 
     public bool IsPlayerTurn()
     {
@@ -514,9 +553,53 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
         return JsonConvert.SerializeObject(game);
     }
 
+    public void SaveGameState()
+    {
+        string saveFilePath = Path.Combine(Application.persistentDataPath, "savegame.json");
+        var settings = new JsonSerializerSettings
+        {
+            TypeNameHandling = TypeNameHandling.All,
+            ReferenceLoopHandling = ReferenceLoopHandling.Ignore,
+            PreserveReferencesHandling = PreserveReferencesHandling.None,
+            Converters = new List<JsonConverter> { new JsonPieceConverter() }
+        };
+
+        string serializedGame = JsonConvert.SerializeObject(game, settings);
+        File.WriteAllText(saveFilePath, serializedGame);
+        Debug.Log($"[GameManager] Game state saved to {saveFilePath}");
+    }
+
+    public void LoadGameState()
+    {
+        string saveFilePath = Path.Combine(Application.persistentDataPath, "savegame.json");
+        if (!File.Exists(saveFilePath))
+        {
+            Debug.LogError($"[GameManager] Save file not found at {saveFilePath}");
+            return;
+        }
+
+        var settings = new JsonSerializerSettings
+        {
+            TypeNameHandling = TypeNameHandling.All,
+            ReferenceLoopHandling = ReferenceLoopHandling.Ignore,
+            PreserveReferencesHandling = PreserveReferencesHandling.None,
+            Converters = new List<JsonConverter> { new JsonPieceConverter() }
+        };
+
+        string serializedGame = File.ReadAllText(saveFilePath);
+        game = JsonConvert.DeserializeObject<Game>(serializedGame, settings);
+        Debug.Log($"[GameManager] Game state loaded from {saveFilePath}");
+
+        NewGameStartedEvent?.Invoke();
+    }
+
     public void LoadGame(string serializedGame)
     {
         game = JsonConvert.DeserializeObject<Game>(serializedGame);
+
+        game.BoardTimeline.HeadIndex = game.BoardTimeline.Count - 1;
+        game.ConditionsTimeline.HeadIndex = game.ConditionsTimeline.Count - 1;
+
         NewGameStartedEvent?.Invoke();
     }
 

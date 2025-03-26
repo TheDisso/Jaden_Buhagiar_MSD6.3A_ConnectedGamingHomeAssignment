@@ -124,13 +124,16 @@ public class UIManager : MonoBehaviourSingleton<UIManager> {
 		// Retrieve the latest half-move and add it to the move history UI.
 		GameManager.Instance.HalfMoveTimeline.TryGetCurrent(out HalfMove lastMove);
 		AddMoveToHistory(lastMove, sideToMove.Complement());
-	}
 
-	/// <summary>
-	/// Handles the event when the game is reset to a specific half-move.
-	/// Updates the game string and synchronises the move UI timeline.
-	/// </summary>
-	private void OnGameResetToHalfMove() {
+        // At the end of OnMoveExecuted or after assigning roles in GameManager:
+        BoardManager.Instance.EnsureOnlyPiecesOfSideAreEnabled(GameManager.Instance.SideToMove);
+    }
+
+    /// <summary>
+    /// Handles the event when the game is reset to a specific half-move.
+    /// Updates the game string and synchronises the move UI timeline.
+    /// </summary>
+    private void OnGameResetToHalfMove() {
 		// Update the serialized game string input field.
 		UpdateGameStringInputField();
 		// Set the timeline's head index to the current full move number.

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using Newtonsoft.Json;
 
 namespace UnityChess {
 	/// <summary>An 8x8 matrix representation of a chessboard.</summary>
@@ -9,6 +10,14 @@ namespace UnityChess {
 			[Side.White] = null,
 			[Side.Black] = null
 		};*/
+
+        [JsonConstructor]
+        public Board()
+        {
+            // Initialize the boardMatrix with 8x8 dimensions.
+            boardMatrix = new Piece[8, 8];
+        }
+
         private readonly Dictionary<Side, Square> currentKingSquareBySide = new Dictionary<Side, Square>
         {
             [Side.White] = Square.Invalid,

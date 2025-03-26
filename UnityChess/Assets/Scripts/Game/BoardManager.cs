@@ -6,6 +6,7 @@ using UnityEngine;
 using Newtonsoft.Json;
 using static UnityChess.SquareUtil;
 using System.Collections;
+using Unity.Netcode.Components;
 
 /// <summary>
 /// Manages the visual representation of the chess board and piece placement.
@@ -274,7 +275,7 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager>
         string modelName = $"{piece.Owner} {piece.GetType().Name}";
         Debug.Log($"[BoardManager] Creating {modelName} at {position}");
 
-        // 🔹 Ensure square exists in positionMap
+        // Ensure square exists in positionMap
         if (!positionMap.ContainsKey(position))
         {
             Debug.LogError($"[BoardManager] ERROR: No square found at {position}");
@@ -283,7 +284,7 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager>
 
         GameObject squareGO = positionMap[position];
 
-        // 🔹 Instantiate piece from Resources
+        // Instantiate piece from Resources
         GameObject pieceGO = Instantiate(Resources.Load("PieceSets/Marble/" + modelName) as GameObject);
 
         if (pieceGO == null)
@@ -292,16 +293,22 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager>
             return;
         }
 
-        // 🔹 Ensure it has a NetworkObject component
+        // Ensure it has a NetworkObject component
         NetworkObject netObj = pieceGO.GetComponent<NetworkObject>();
         if (netObj == null)
         {
             netObj = pieceGO.AddComponent<NetworkObject>();
         }
 
+        NetworkTransform networkTransform = pieceGO.GetComponent<NetworkTransform>();
+        if (networkTransform == null)
+        {
+            networkTransform = pieceGO.AddComponent<NetworkTransform>();
+        }
+
         netObj.Spawn(); // Ensure it's spawned before reparenting
 
-        // 🔹 Assign ownership (White -> Player[0], Black -> Player[1])
+        // Assign ownership (White -> Player[0], Black -> Player[1])
         if (GameManager.Instance.PlayersConnected.Count >= 2)
         {
             ulong ownerId = (piece.Owner == Side.White) ? GameManager.Instance.PlayersConnected[0] : GameManager.Instance.PlayersConnected[1];
@@ -313,12 +320,12 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager>
             Debug.LogWarning($"[BoardManager] Warning: Not enough players connected to assign ownership.");
         }
 
-        // 🔹 Ensure proper snapping
+        // Ensure proper snapping
         pieceGO.transform.SetParent(squareGO.transform);
         pieceGO.transform.localPosition = Vector3.zero; // 🔥 Snaps exactly to square
         pieceGO.transform.localRotation = Quaternion.identity; // 🔥 Ensures no unwanted rotation
 
-        // 🔹 Sync placement with clients
+        // Sync placement with clients
         SetPieceParentClientRpc(JsonConvert.SerializeObject(new NetworkSquare(position)), netObj);
     }
 
@@ -393,7 +400,7 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager>
             pieceBehaviour.enabled = active;
     }
 
-    public void EnsureOnlyPiecesOfSideAreEnabled(Side side)
+    /*public void EnsureOnlyPiecesOfSideAreEnabled(Side side)
     {
         VisualPiece[] visualPiece = GetComponentsInChildren<VisualPiece>(true);
         foreach (VisualPiece pieceBehaviour in visualPiece)
@@ -401,6 +408,33 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager>
             Piece piece = GameManager.Instance.CurrentBoard[pieceBehaviour.CurrentSquare];
             pieceBehaviour.enabled = pieceBehaviour.PieceColor == side
                                      && GameManager.Instance.HasLegalMoves(piece);
+        }
+    }*/
+
+    public void EnsureOnlyPiecesOfSideAreEnabled(Side side)
+    {
+        VisualPiece[] visualPieces = GetComponentsInChildren<VisualPiece>(true);
+
+        foreach (VisualPiece pieceBehaviour in visualPieces)
+        {
+            Piece piece = GameManager.Instance.CurrentBoard[pieceBehaviour.CurrentSquare];
+
+            if (piece == null)
+            {
+                Debug.LogWarning($"[BoardManager] Skipping {pieceBehaviour.name}, no board piece found.");
+                continue;
+            }
+
+            bool shouldEnable = pieceBehaviour.PieceColor == side;
+
+            // Only run HasLegalMoves on the host
+            if (NetworkManager.Singleton.IsHost)
+            {
+                shouldEnable = shouldEnable && GameManager.Instance.HasLegalMoves(piece);
+            }
+
+            pieceBehaviour.enabled = shouldEnable;
+            Debug.Log($"[BoardManager] {pieceBehaviour.PieceColor} {pieceBehaviour.name} enabled = {shouldEnable}");
         }
     }
 
@@ -427,7 +461,7 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager>
         return positionMap.ContainsKey(position) ? positionMap[position] : null;
     }
 
-    public void MovePieceOnClient(int fromFile, int fromRank, int toFile, int toRank)
+    /*public void MovePieceOnClient(int fromFile, int fromRank, int toFile, int toRank)
     {
         GameObject pieceGO = GetPieceGOAtPosition(new Square(fromFile, fromRank));
         GameObject targetSquare = GetSquareGOByPosition(new Square(toFile, toRank));
@@ -437,27 +471,27 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager>
             pieceGO.transform.SetParent(targetSquare.transform);
             pieceGO.transform.localPosition = Vector3.zero;
         }
+    }*/
+}
+
+[Serializable]
+public class SquareData
+{
+    public string Name;
+    public float x;
+    public float y;
+    public float z;
+
+    public SquareData(string name, Vector3 position)
+    {
+        Name = name;
+        x = position.x;
+        y = position.y;
+        z = position.z;
     }
 
-    [Serializable]
-    public class SquareData
+    public Vector3 ToVector3()
     {
-        public string Name;
-        public float x;
-        public float y;
-        public float z;
-
-        public SquareData(string name, Vector3 position)
-        {
-            Name = name;
-            x = position.x;
-            y = position.y;
-            z = position.z;
-        }
-
-        public Vector3 ToVector3()
-        {
-            return new Vector3(x, y, z);
-        }
+        return new Vector3(x, y, z);
     }
 }
