@@ -233,7 +233,7 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager>
             ClearBoard(); // Remove any previously placed pieces
             foreach ((Square square, Piece piece) in GameManager.Instance.CurrentPieces)
             {
-                Debug.Log($"[BoardManager] Spawning {piece} at {square}");
+                Debug.Log($"[BoardManager] Spawning {piece.Owner} {piece.GetType().Name} at {square}");
                 CreateAndPlacePieceGO(piece, square);
             }
             EnsureOnlyPiecesOfSideAreEnabled(GameManager.Instance.SideToMove);

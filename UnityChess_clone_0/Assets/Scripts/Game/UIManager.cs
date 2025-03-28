@@ -184,12 +184,15 @@ public class UIManager : MonoBehaviourSingleton<UIManager> {
 	/// </summary>
 	public void LoadGame() => GameManager.Instance.LoadGame(GameStringInputField.text);
 
-	/// <summary>
-	/// Adds a new move to the move history UI based on the latest half-move.
-	/// </summary>
-	/// <param name="latestHalfMove">The most recent half-move executed.</param>
-	/// <param name="latestTurnSide">The side that executed the move (complement of the current turn).</param>
-	private void AddMoveToHistory(HalfMove latestHalfMove, Side latestTurnSide) {
+    public void SaveCurrentGame() => GameManager.Instance.SaveGameToFirebase();
+    public void LoadCurrentGame() => GameManager.Instance.LoadGameFromFirebase();
+
+    /// <summary>
+    /// Adds a new move to the move history UI based on the latest half-move.
+    /// </summary>
+    /// <param name="latestHalfMove">The most recent half-move executed.</param>
+    /// <param name="latestTurnSide">The side that executed the move (complement of the current turn).</param>
+    private void AddMoveToHistory(HalfMove latestHalfMove, Side latestTurnSide) {
 		// Remove any alternate history entries if the timeline is not up-to-date.
 		RemoveAlternateHistory();
 		

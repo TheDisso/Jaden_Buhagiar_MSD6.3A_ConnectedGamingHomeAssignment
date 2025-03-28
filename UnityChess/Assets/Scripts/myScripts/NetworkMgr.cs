@@ -1,11 +1,14 @@
 using System.Collections;
 using System.Collections.Generic;
+using TMPro;
 using Unity.Netcode;
 using UnityEngine;
+using UnityEngine.UI;
 
 public class NetworkMgr : NetworkBehaviourSingleton<NetworkMgr>
 {
     public FirebaseManager firebaseManager;
+    public TextMeshProUGUI sessionUserIndicatorText;
 
     public void StartHost()
     {
@@ -14,6 +17,8 @@ public class NetworkMgr : NetworkBehaviourSingleton<NetworkMgr>
             //firebaseManager.SetUserID("0");
             NetworkManager.Singleton.StartHost();
             UnityAnalyticsManager.Instance.LogHostStarted();
+            if (sessionUserIndicatorText != null)
+                sessionUserIndicatorText.text = "SESSION: HOST";
             Debug.Log("[NetworkMgr] Host started.");
         }
         else
@@ -29,6 +34,8 @@ public class NetworkMgr : NetworkBehaviourSingleton<NetworkMgr>
             //firebaseManager.SetUserID("1");
             NetworkManager.Singleton.StartClient();
             UnityAnalyticsManager.Instance.LogClientStarted();
+            if (sessionUserIndicatorText != null)
+                sessionUserIndicatorText.text = "SESSION: CLIENT";
             Debug.Log("[NetworkMgr] Client started.");
         }
         else

@@ -10,6 +10,8 @@ using UnityEngine;
 using Newtonsoft.Json;
 using static UnityChess.SquareUtil;
 using TMPro;
+using Firebase.Firestore;
+using Firebase.Extensions;
 
 /// <summary>
 /// Manages the overall game state, including game start, moves execution,
@@ -509,6 +511,20 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
     {
         PlayersConnected.Add(clientId);
         UpdatePlayersClientRpc(PlayersConnected.ToArray());
+
+        if (IsServer && IsGameInitialized())
+        {
+            string serializedGame = SerializeGame();
+            ClientRpcParams rpcParams = new ClientRpcParams
+            {
+                Send = new ClientRpcSendParams
+                {
+                    // Target only the newly connected client.
+                    TargetClientIds = new List<ulong> { clientId }
+                }
+            };
+            SyncGameStateClientRpc(serializedGame, rpcParams);
+        }
     }
 
     private void OnClientPlayerDisconnected(ulong id)
@@ -520,6 +536,16 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
     private void UpdatePlayersClientRpc(ulong[] playerIDs)
     {
         PlayersConnected = new List<ulong>(playerIDs);
+    }
+
+    [ClientRpc]
+    private void SyncGameStateClientRpc(string serializedGame, ClientRpcParams clientRpcParams = default)
+    {
+        if (!IsServer) // Only process on clients
+        {
+            Debug.Log("[GameManager] Received game state sync.");
+            LoadGame(serializedGame);
+        }
     }
 
     public void AssignRole()
@@ -671,5 +697,129 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
 
         MoveExecutedEvent?.Invoke();
         return true;
+    }
+
+    public void SaveGameToFirebase()
+    {
+        List<FirebasePieceData> saveData = new List<FirebasePieceData>();
+        foreach ((Square square, Piece piece) in CurrentPieces)
+        {
+            saveData.Add(new FirebasePieceData(square, piece));
+        }
+
+        string json = JsonConvert.SerializeObject(saveData);
+        FirebaseFirestore db = FirebaseFirestore.DefaultInstance;
+        DocumentReference docRef = db.Collection("SavedGames").Document("latest");
+
+        Dictionary<string, object> data = new Dictionary<string, object> {
+        { "pieces", json },
+        { "timestamp", FieldValue.ServerTimestamp }
+    };
+
+        docRef.SetAsync(data).ContinueWithOnMainThread(task =>
+        {
+            if (task.IsCompletedSuccessfully)
+                Debug.Log("[GameManager] Game saved to Firebase.");
+            else
+                Debug.LogError("[GameManager] Failed to save game to Firebase.");
+        });
+    }
+
+    public void LoadGameFromFirebase()
+    {
+        Debug.Log("[GameManager] LoadGameFromFirebase() called!");
+
+        FirebaseFirestore db = FirebaseFirestore.DefaultInstance;
+        DocumentReference docRef = db.Collection("SavedGames").Document("latest");
+
+        docRef.GetSnapshotAsync().ContinueWithOnMainThread(task =>
+        {
+            if (task.IsCanceled)
+            {
+                Debug.LogError("[GameManager] Firebase task was canceled.");
+                return;
+            }
+
+            if (task.IsFaulted)
+            {
+                Debug.LogError($"[GameManager] Firebase task faulted: {task.Exception}");
+                return;
+            }
+
+            if (!task.Result.Exists)
+            {
+                Debug.LogWarning("[GameManager] Document 'latest' does not exist.");
+                return;
+            }
+
+            try
+            {
+                string rawJsonString = task.Result.GetValue<string>("pieces"); // this is a JSON array
+                Debug.Log($"[GameManager] Fetched JSON: {rawJsonString}");
+
+                List<FirebasePieceData> pieces = JsonConvert.DeserializeObject<List<FirebasePieceData>>(rawJsonString);
+                LoadFromFirebaseData(pieces);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[GameManager] Exception while loading Firebase game: {ex}");
+            }
+        });
+    }
+
+    private void LoadFromFirebaseData(List<FirebasePieceData> pieces)
+    {
+        if (pieces == null || pieces.Count == 0)
+        {
+            Debug.LogError("[GameManager] No pieces to load.");
+            return;
+        }
+
+        Debug.Log($"[GameManager] Loading {pieces.Count} pieces from Firebase...");
+
+        List<(Square, Piece)> loadedPieces = new List<(Square, Piece)>();
+
+        foreach (var pieceData in pieces)
+        {
+            Square square = SquareUtil.StringToSquare(pieceData.square);
+
+            if (square == null)
+            {
+                Debug.LogError($"[GameManager] Invalid square string: {pieceData.square}");
+                continue;
+            }
+
+            if (!Enum.TryParse(pieceData.owner, out Side owner))
+            {
+                Debug.LogError($"[GameManager] Invalid owner: {pieceData.owner}");
+                continue;
+            }
+
+            Piece piece = pieceData.type switch
+            {
+                "Pawn" => new Pawn(owner),
+                "Rook" => new Rook(owner),
+                "Knight" => new Knight(owner),
+                "Bishop" => new Bishop(owner),
+                "Queen" => new Queen(owner),
+                "King" => new King(owner),
+                _ => null
+            };
+
+            if (piece != null)
+            {
+                Debug.Log($"[GameManager] Rebuilt piece: {owner} {piece.GetType().Name} at {square}");
+                loadedPieces.Add((square, piece));
+            }
+            else
+            {
+                Debug.LogError($"[GameManager] Unknown piece type: {pieceData.type}");
+            }
+        }
+
+        game = new Game(GameConditions.NormalStartingConditions, loadedPieces.ToArray());
+        Debug.Log("[GameManager] New Game object created from Firebase data.");
+
+        NewGameStartedEvent?.Invoke();
     }
 }

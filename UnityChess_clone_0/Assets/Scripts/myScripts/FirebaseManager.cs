@@ -5,7 +5,6 @@ using Firebase.Firestore;
 using Firebase.Extensions;
 using UnityEngine.UI;
 using TMPro;
-using Firebase.Auth;
 using Unity.Netcode;
 using UnityEngine.Networking;
 using System.Collections.Generic;
@@ -15,10 +14,10 @@ public class FirebaseManager : NetworkBehaviour
     private FirebaseFirestore db;
     private ListenerRegistration purchaseListener;
 
-    public Image profileImage; // Assign in Unity Editor
+    public Image profileImage, otherProfileImage; // Assign in Unity Editor
     public TextMeshProUGUI coinsText; // Assign in Unity Editor
-    public string userID = "0"; // This should be dynamically set per user
     public TextMeshProUGUI purchaseNotifText;
+    public string userID = "0"; // This should be dynamically set per user
     //public string userID;
 
     private void Awake()
@@ -37,8 +36,19 @@ public class FirebaseManager : NetworkBehaviour
         InitializeFirebase();
 
         StartPurchaseListener();
+        //StartProfileListener("0", profileImage);
+        //StartProfileListener("1", otherProfileImage);
+        if (userID == "0")
+        {
+            StartProfileListener("0", profileImage);
+            StartProfileListener("1", otherProfileImage);
+        }
+        else
+        {
+            StartProfileListener("1", profileImage);
+            StartProfileListener("0", otherProfileImage);
+        }
     }
-
 
     private void OnDestroy()
     {
@@ -62,6 +72,67 @@ public class FirebaseManager : NetworkBehaviour
                 Debug.LogError("Could not resolve Firebase dependencies: " + task.Result);
             }
         });
+    }
+
+    /// <summary>
+    /// Sets up a listener on the Users/{userID} document. When the "profileImageURL" field updates,
+    /// download and apply the image to the provided target Image UI element.
+    /// </summary>
+    private void StartProfileListener(string targetUserId, Image targetImage)
+    {
+        DocumentReference docRef = db.Collection("Users").Document(targetUserId);
+        docRef.Listen(snapshot =>
+        {
+            if (!snapshot.Exists)
+            {
+                Debug.LogWarning($"[FirebaseManager] No document for user {targetUserId}.");
+                return;
+            }
+
+            if (snapshot.TryGetValue<string>("profileImageURL", out string imageUrl))
+            {
+                if (!string.IsNullOrEmpty(imageUrl))
+                {
+                    Debug.Log($"[FirebaseManager] Got image for user {targetUserId}: {imageUrl}");
+                    StartCoroutine(DownloadAndApplyImage(imageUrl, targetImage));
+                }
+                else
+                {
+                    Debug.LogWarning($"[FirebaseManager] profileImageURL is empty for user {targetUserId}.");
+                }
+            }
+            else
+            {
+                Debug.LogWarning($"[FirebaseManager] profileImageURL missing for user {targetUserId}.");
+            }
+        });
+    }
+
+    private IEnumerator DownloadAndApplyImage(string imageUrl, Image targetImage)
+    {
+        if (string.IsNullOrEmpty(imageUrl))
+        {
+            Debug.LogError("[FirebaseManager] Attempted to download an empty/null image URL.");
+            yield break;
+        }
+
+        using (UnityWebRequest request = UnityWebRequestTexture.GetTexture(imageUrl))
+        {
+            yield return request.SendWebRequest();
+
+            if (request.result == UnityWebRequest.Result.Success)
+            {
+                Texture2D texture = DownloadHandlerTexture.GetContent(request);
+                Sprite newSprite = Sprite.Create(texture, new Rect(0, 0, texture.width, texture.height), Vector2.zero);
+
+                targetImage.sprite = newSprite;
+                Debug.Log($"[FirebaseManager] Successfully applied image from URL: {imageUrl}");
+            }
+            else
+            {
+                Debug.LogError($"[FirebaseManager] Failed to download image for URL {imageUrl}: {request.error}");
+            }
+        }
     }
 
     // Fetches both profile picture and coins for a user
@@ -195,25 +266,22 @@ public class FirebaseManager : NetworkBehaviour
 
     private void SaveImageURLToFirestore(string imageUrl)
     {
-        FirebaseAuth auth = FirebaseAuth.DefaultInstance;
-        FirebaseUser user = auth.CurrentUser;
-
-        if (user == null)
+        if (string.IsNullOrEmpty(userID))
         {
-            Debug.LogWarning("[FirebaseManager] No user authenticated. Skipping Firestore update.");
+            Debug.LogWarning("[FirebaseManager] userID is empty. Cannot update profileImageURL.");
             return;
         }
 
-        DocumentReference userDoc = db.Collection("Users").Document(user.UserId);
+        DocumentReference userDoc = db.Collection("Users").Document(userID);
         userDoc.UpdateAsync("profileImageURL", imageUrl).ContinueWithOnMainThread(task =>
         {
-            if (task.IsCompleted)
+            if (task.IsCompletedSuccessfully)
             {
-                Debug.Log("[FirebaseManager] Image URL updated in Firestore.");
+                Debug.Log($"[FirebaseManager] profileImageURL updated for user {userID}");
             }
             else
             {
-                Debug.LogError("[FirebaseManager] Failed to update Firestore: " + task.Exception);
+                Debug.LogError("[FirebaseManager] Failed to update profileImageURL: " + task.Exception);
             }
         });
     }
@@ -285,13 +353,30 @@ public class FirebaseManager : NetworkBehaviour
         });
     }
 
-    public void ApplyPurchasedProfileImage(string imageUrl)
+    /*public void ApplyPurchasedProfileImage(string imageUrl)
     {
         SetUserProfileImage(imageUrl); // Save to Firestore (as already implemented)
         StartCoroutine(DownloadAndApplyImage(imageUrl)); // Apply it in runtime
+    }*/
+
+    public void ApplyPurchasedProfileImage(string imageUrl)
+    {
+        // Save to Firestore
+        SaveImageURLToFirestore(imageUrl);
+
+        // Determine which image to update locally
+        if (userID == "0")
+        {
+            StartCoroutine(DownloadAndApplyImage(imageUrl, profileImage));
+        }
+        else if (userID == "1")
+        {
+            StartCoroutine(DownloadAndApplyImage(imageUrl, profileImage));
+        }
     }
 
-    private IEnumerator DownloadAndApplyImage(string imageUrl)
+
+    /*private IEnumerator DownloadAndApplyImage(string imageUrl)
     {
         using (UnityWebRequest request = UnityWebRequestTexture.GetTexture(imageUrl))
         {
@@ -310,7 +395,7 @@ public class FirebaseManager : NetworkBehaviour
                 Debug.LogError($"[FirebaseManager] Failed to download image: {request.error}");
             }
         }
-    }
+    }*/
 
     public void AddImageToOwnedList(string imageUrl)
     {
