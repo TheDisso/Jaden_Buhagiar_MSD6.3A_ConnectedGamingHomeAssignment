@@ -111,7 +111,7 @@ public class DlcStoreManager : NetworkBehaviour
                             lastLockedButton = selectButton;
                             lastLockedButtonText = buttonText;
 
-                            UnityAnalyticsManager.Instance.LogDlcPurchase(imageUrl);
+                            UnityAnalyticsManager.Instance.LogDlcPurchase(firebaseManager.userID, imageUrl);
                             //NotifyAllPlayersClientRpc(imageUrl);
                             //firebaseManager.NotifyAllClientsSkinUsedServerRpc(imageUrl);
                         }
@@ -141,7 +141,7 @@ public class DlcStoreManager : NetworkBehaviour
                                     lastLockedButton = selectButton;
                                     lastLockedButtonText = buttonText;
 
-                                    UnityAnalyticsManager.Instance.LogDlcPurchase(imageUrl);
+                                    UnityAnalyticsManager.Instance.LogDlcPurchase(firebaseManager.userID, imageUrl);
                                     //NotifyAllPlayersClientRpc(imageUrl);
                                     //firebaseManager.NotifyAllClientsSkinUsedServerRpc(imageUrl);
                                 }

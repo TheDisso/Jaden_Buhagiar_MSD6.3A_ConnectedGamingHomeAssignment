@@ -16,7 +16,7 @@ public class NetworkMgr : NetworkBehaviourSingleton<NetworkMgr>
         {
             //firebaseManager.SetUserID("0");
             NetworkManager.Singleton.StartHost();
-            UnityAnalyticsManager.Instance.LogHostStarted();
+            UnityAnalyticsManager.Instance.LogHostStarted(firebaseManager.userID);
             if (sessionUserIndicatorText != null)
                 sessionUserIndicatorText.text = "SESSION: HOST";
             Debug.Log("[NetworkMgr] Host started.");
@@ -33,7 +33,7 @@ public class NetworkMgr : NetworkBehaviourSingleton<NetworkMgr>
         {
             //firebaseManager.SetUserID("1");
             NetworkManager.Singleton.StartClient();
-            UnityAnalyticsManager.Instance.LogClientStarted();
+            UnityAnalyticsManager.Instance.LogClientStarted(firebaseManager.userID);
             if (sessionUserIndicatorText != null)
                 sessionUserIndicatorText.text = "SESSION: CLIENT";
             Debug.Log("[NetworkMgr] Client started.");
@@ -56,5 +56,4 @@ public class NetworkMgr : NetworkBehaviourSingleton<NetworkMgr>
             Debug.LogWarning("[NetworkMgr] Server already running!");
         }
     }
-
 }

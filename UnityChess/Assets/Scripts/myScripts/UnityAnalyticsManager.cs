@@ -1,5 +1,8 @@
 using System;
 using System.Collections.Generic;
+using Unity.Services.Analytics;
+using Unity.Services.Core;
+using UnityEditor.PackageManager.UI;
 using UnityEngine;
 using UnityEngine.Analytics;
 
@@ -23,7 +26,12 @@ public class UnityAnalyticsManager : MonoBehaviour
         Debug.Log($"[AnalyticsManager] Initialized with session ID: {_sessionID}");
     }
 
-    private Dictionary<string, object> WithSession(Dictionary<string, object> data = null)
+    private void Start()
+    {
+        InitUnityAnalytics();
+    }
+
+    /*private Dictionary<string, object> WithSession(Dictionary<string, object> data = null)
     {
         if (data == null) data = new Dictionary<string, object>();
 
@@ -64,7 +72,75 @@ public class UnityAnalyticsManager : MonoBehaviour
         Debug.Log($"[AnalyticsManager] LogDlcPurchase() called – sending 'dlc_purchase' event. Item: {itemName}");
         Analytics.CustomEvent("dlc_purchase", WithSession(new Dictionary<string, object>
         {
-            { "item", itemName }
+            { "itemName", itemName }
         }));
+    }*/
+
+    public void LogHostStarted(string userID)
+    {
+        Debug.Log("[AnalyticsManager] LogHostStarted() called – sending 'host_started' event.");
+        Unity.Services.Analytics.CustomEvent myEvent = new("host_started")
+        {
+            { "CustomSessionID", _sessionID },
+            { "CustomTimestamp", DateTime.UtcNow.ToString("o") },
+            { "CustomPlayerID", userID }
+        };
+        AnalyticsService.Instance.RecordEvent(myEvent);
+    }
+
+    public void LogClientStarted(string userID)
+    {
+        Debug.Log("[AnalyticsManager] LogClientStarted() called – sending 'client_started' event.");
+        Unity.Services.Analytics.CustomEvent myEvent = new("client_started")
+        {
+            { "CustomSessionID", _sessionID },
+            { "CustomTimestamp", DateTime.UtcNow.ToString("o") },
+            { "CustomPlayerID", userID }
+        };
+        AnalyticsService.Instance.RecordEvent(myEvent);
+    }
+
+    public void LogMatchStarted()
+    {
+        Debug.Log("[AnalyticsManager] LogMatchStarted() called – sending 'match_started' event.");
+        Unity.Services.Analytics.CustomEvent myEvent = new("match_started")
+        {
+            { "CustomSessionID", _sessionID },
+            { "CustomTimestamp", DateTime.UtcNow.ToString("o") }
+        };
+        AnalyticsService.Instance.RecordEvent(myEvent);
+    }
+
+    public void LogMatchEnded(string result)
+    {
+        Debug.Log($"[AnalyticsManager] LogMatchEnded() called – sending 'match_ended' event. Result: {result}");
+        Unity.Services.Analytics.CustomEvent myEvent = new("match_ended")
+        {
+            { "CustomSessionID", _sessionID },
+            { "CustomTimestamp", DateTime.UtcNow.ToString("o") }
+        };
+        AnalyticsService.Instance.RecordEvent(myEvent);
+    }
+
+    public void LogDlcPurchase(string userID, string itemName)
+    {
+        Debug.Log($"[AnalyticsManager] LogDlcPurchase() called – sending 'dlc_purchase' event. Item: {itemName}");
+        Unity.Services.Analytics.CustomEvent myEvent = new("dlc_purchase")
+        {
+            { "CustomSessionID", _sessionID },
+            { "CustomTimestamp", DateTime.UtcNow.ToString("o") },
+            { "CustomPlayerID", userID },
+            { "itemName", itemName }
+        };
+        AnalyticsService.Instance.RecordEvent(myEvent);
+    }
+
+    private async void InitUnityAnalytics()
+    {
+        await UnityServices.InitializeAsync();
+        if (AnalyticsService.Instance != null)
+        {
+            AnalyticsService.Instance.StartDataCollection();
+        }
     }
 }
