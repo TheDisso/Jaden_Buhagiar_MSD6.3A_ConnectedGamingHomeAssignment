@@ -435,6 +435,7 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager>
 
             pieceBehaviour.enabled = shouldEnable;
             Debug.Log($"[BoardManager] {pieceBehaviour.PieceColor} {pieceBehaviour.name} enabled = {shouldEnable}");
+            Debug.Log($"[BoardManager] EnsureOnlyPiecesOfSideAreEnabled called. IsHost={NetworkManager.Singleton.IsHost}, Side={side}");
         }
     }
 

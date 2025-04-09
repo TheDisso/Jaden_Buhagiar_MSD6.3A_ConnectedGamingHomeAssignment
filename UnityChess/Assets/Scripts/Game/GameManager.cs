@@ -558,6 +558,7 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
             Debug.Log($"[GameManager] Server updated turn to {nextTurn}");
 
             // Notify clients
+            RefreshPieceInteractivityClientRpc(NetworkSideToMove.Value);
             SyncTurnClientRpc(nextTurn);
         }
     }
@@ -572,6 +573,17 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
         }
 
         NetworkSideToMove.Value = newTurn; // Ensure only the SERVER modifies this
+    }
+
+    [ClientRpc]
+    private void RefreshPieceInteractivityClientRpc(Side side)
+    {
+        Debug.Log($"[GameManager] Refreshing piece interactivity for: {side}");
+
+        if (!IsServer) // Clients only
+        {
+            BoardManager.Instance.EnsureOnlyPiecesOfSideAreEnabled(side);
+        }
     }
 
     public string SerializeGame()

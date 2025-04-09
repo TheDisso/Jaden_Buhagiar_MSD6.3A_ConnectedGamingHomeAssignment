@@ -60,11 +60,11 @@ public class VisualPiece : NetworkBehaviour
     {
         Debug.Log($"[VisualPiece] Player {NetworkManager.Singleton.LocalClientId} clicked {PieceColor} at {CurrentSquare}. Owner: {IsOwner}");
 
-        if (!IsOwner)
-        {
-            Debug.LogWarning($"[VisualPiece] Player {NetworkManager.Singleton.LocalClientId} tried moving {PieceColor}, but lacks ownership.");
-            return;
-        }
+        //if (!IsOwner)
+        //{
+        //    Debug.LogWarning($"[VisualPiece] Player {NetworkManager.Singleton.LocalClientId} tried moving {PieceColor}, but lacks ownership.");
+        //    return;
+        //}
 
         if (!GameManager.Instance.IsPlayerTurn() || PieceColor != GameManager.Instance.SideToMove)
         {
@@ -87,8 +87,15 @@ public class VisualPiece : NetworkBehaviour
         if (enabled)
         {
             Vector3 nextPiecePositionSS = new Vector3(Input.mousePosition.x, Input.mousePosition.y, piecePositionSS.z);
-            thisTransform.position = boardCamera.ScreenToWorldPoint(nextPiecePositionSS);
+            Vector3 finalPos = boardCamera.ScreenToWorldPoint(nextPiecePositionSS);
+            MovePieceServerRpc(finalPos.x, finalPos.y, finalPos.z);
         }
+    }
+
+    [ServerRpc(RequireOwnership = false)]
+    private void MovePieceServerRpc(float x, float y, float z)
+    {
+        transform.position = new Vector3(x, y, z);
     }
 
     public void OnMouseUp()
