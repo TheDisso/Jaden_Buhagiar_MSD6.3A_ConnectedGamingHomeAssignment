@@ -9,28 +9,42 @@ using Unity.Netcode;
 using UnityEngine.Networking;
 using System.Collections.Generic;
 
+/// <summary>
+/// Manages Firebase functionality including user profile picture, coin balance, purchases, and real-time listeners.
+/// Integrates with Unity UI and networking.
+/// </summary>
 public class FirebaseManager : NetworkBehaviour
 {
     private FirebaseFirestore db;
     private ListenerRegistration purchaseListener;
 
-    public Image profileImage, otherProfileImage; // Assign in Unity Editor
-    public TextMeshProUGUI coinsText; // Assign in Unity Editor
+    [Header("Firebase Related Components")]
+    public Image profileImage, otherProfileImage;
+    public TextMeshProUGUI coinsText;
     public TextMeshProUGUI purchaseNotifText;
-    public string userID = "0"; // This should be dynamically set per user
+    public string userID = "0";
     //public string userID;
 
+    /// <summary>
+    /// Called before Start. Sets Firestore persistence off and initializes the db reference.
+    /// </summary>
     private void Awake()
     {
         FirebaseFirestore.DefaultInstance.Settings.PersistenceEnabled = false;
         db = FirebaseFirestore.DefaultInstance;
     }
 
+    /// <summary>
+    /// Called when the object is spawned over the network. Used for logging.
+    /// </summary>
     public override void OnNetworkSpawn()
     {
         Debug.Log($"[FirebaseManager] OnNetworkSpawn called on client {NetworkManager.Singleton.LocalClientId}");
     }
 
+    /// <summary>
+    /// Initializes Firebase dependencies and sets up listeners and user profile loading based on user ID.
+    /// </summary>
     private void Start()
     {
         InitializeFirebase();
@@ -50,12 +64,18 @@ public class FirebaseManager : NetworkBehaviour
         }
     }
 
+    /// <summary>
+    /// Ensures any active Firestore listeners are removed on destroy.
+    /// </summary>
     private void OnDestroy()
     {
         // Stop listening when the object is destroyed
         purchaseListener?.Stop();
     }
 
+    /// <summary>
+    /// Initializes Firebase and fetches initial user data if available.
+    /// </summary>
     private void InitializeFirebase()
     {
         FirebaseApp.CheckAndFixDependenciesAsync().ContinueWithOnMainThread(task =>
@@ -75,8 +95,7 @@ public class FirebaseManager : NetworkBehaviour
     }
 
     /// <summary>
-    /// Sets up a listener on the Users/{userID} document. When the "profileImageURL" field updates,
-    /// download and apply the image to the provided target Image UI element.
+    /// Starts a Firestore listener on the given user’s profile picture field and updates the image in the UI.
     /// </summary>
     private void StartProfileListener(string targetUserId, Image targetImage)
     {
@@ -108,6 +127,9 @@ public class FirebaseManager : NetworkBehaviour
         });
     }
 
+    /// <summary>
+    /// Downloads and applies a profile image from the given URL to a UI Image component.
+    /// </summary>
     private IEnumerator DownloadAndApplyImage(string imageUrl, Image targetImage)
     {
         if (string.IsNullOrEmpty(imageUrl))
@@ -135,13 +157,18 @@ public class FirebaseManager : NetworkBehaviour
         }
     }
 
-    // Fetches both profile picture and coins for a user
+    /// <summary>
+    /// Fetches the user’s profile picture and coin count.
+    /// </summary>
     public void FetchUserData(string userID)
     {
         FetchProfilePicture(userID);
         FetchUserCoins(userID);
     }
 
+    /// <summary>
+    /// Loads a profile picture from disk if available, otherwise attempts to download it from Firestore.
+    /// </summary>
     public void FetchProfilePicture(string userID)
     {
         string localPath = GetLocalProfileImagePath();
@@ -171,6 +198,9 @@ public class FirebaseManager : NetworkBehaviour
         }
     }
 
+    /// <summary>
+    /// Loads an image from a local file path and applies it to the profile image UI.
+    /// </summary>
     private IEnumerator LoadImageFromLocalPath(string path)
     {
         byte[] imageData = System.IO.File.ReadAllBytes(path);
@@ -184,7 +214,9 @@ public class FirebaseManager : NetworkBehaviour
     }
 
 
-    // Downloads and applies profile picture from URL
+    /// <summary>
+    /// Downloads an image using the legacy WWW class and sets it as the profile image.
+    /// </summary>
     private IEnumerator LoadImageFromURL(string imageUrl)
     {
         using (WWW www = new WWW(imageUrl))
@@ -202,7 +234,9 @@ public class FirebaseManager : NetworkBehaviour
         }
     }
 
-    // Fetches user coins from Firestore
+    /// <summary>
+    /// Retrieves the user’s coin balance from Firestore and updates the UI.
+    /// </summary>
     public void FetchUserCoins(string userID)
     {
         DocumentReference docRef = db.Collection("Users").Document(userID);
@@ -221,18 +255,26 @@ public class FirebaseManager : NetworkBehaviour
         });
     }
 
-    // Allow dynamically switching between users
+    /// <summary>
+    /// Dynamically sets the active Firebase user ID and reloads their data.
+    /// </summary>
     public void SetUserID(string newUserID)
     {
         userID = newUserID;
         FetchUserData(userID);
     }
 
+    /// <summary>
+    /// Downloads an image, saves it locally, applies it to UI, and updates Firestore with the URL.
+    /// </summary>
     public void SetUserProfileImage(string imageUrl)
     {
         StartCoroutine(DownloadAndSaveProfileImage(imageUrl));
     }
 
+    /// <summary>
+    /// Coroutine that handles downloading and saving a profile image to disk, then sets it in Firestore.
+    /// </summary>
     private IEnumerator DownloadAndSaveProfileImage(string imageUrl)
     {
         using (UnityWebRequest request = UnityWebRequestTexture.GetTexture(imageUrl))
@@ -264,6 +306,9 @@ public class FirebaseManager : NetworkBehaviour
         }
     }
 
+    /// <summary>
+    /// Updates Firestore to point to a new profile image URL for the current user.
+    /// </summary>
     private void SaveImageURLToFirestore(string imageUrl)
     {
         if (string.IsNullOrEmpty(userID))
@@ -286,6 +331,9 @@ public class FirebaseManager : NetworkBehaviour
         });
     }
 
+    /// <summary>
+    /// Constructs and returns the file path for the local profile image based on the user ID.
+    /// </summary>
     private string GetLocalProfileImagePath()
     {
         return System.IO.Path.Combine(Application.persistentDataPath, $"{userID}_profile.png");
@@ -305,6 +353,9 @@ public class FirebaseManager : NetworkBehaviour
         // Here you can also trigger avatar update, UI update, etc.
     }*/
 
+    /// <summary>
+    /// Attempts to deduct coins from the user's balance in Firestore and invokes callback with result.
+    /// </summary>
     public void TryPurchaseItem(int cost, System.Action<bool> onComplete = null)
     {
         DocumentReference userDoc = db.Collection("Users").Document(userID);
@@ -359,6 +410,9 @@ public class FirebaseManager : NetworkBehaviour
         StartCoroutine(DownloadAndApplyImage(imageUrl)); // Apply it in runtime
     }*/
 
+    /// <summary>
+    /// Applies a newly purchased profile image to the current user and updates Firestore.
+    /// </summary>
     public void ApplyPurchasedProfileImage(string imageUrl)
     {
         // Save to Firestore
@@ -397,6 +451,9 @@ public class FirebaseManager : NetworkBehaviour
         }
     }*/
 
+    /// <summary>
+    /// Adds a given image URL to the current user’s list of owned images in Firestore.
+    /// </summary>
     public void AddImageToOwnedList(string imageUrl)
     {
         DocumentReference userDoc = db.Collection("Users").Document(userID); // use manual userID
@@ -413,6 +470,9 @@ public class FirebaseManager : NetworkBehaviour
         });
     }
 
+    /// <summary>
+    /// Retrieves a list of all profile images the user owns from Firestore.
+    /// </summary>
     public void GetOwnedImages(System.Action<List<string>> onComplete)
     {
         DocumentReference userDoc = db.Collection("Users").Document(userID);
@@ -433,8 +493,7 @@ public class FirebaseManager : NetworkBehaviour
     }
 
     /// <summary>
-    /// Sets up a listener on StoreEvents/latestPurchase. 
-    /// Whenever that doc changes, all listening clients get a callback in real time.
+    /// Sets up a real-time Firestore listener that triggers when a new DLC purchase is made.
     /// </summary>
     private void StartPurchaseListener()
     {
@@ -468,8 +527,7 @@ public class FirebaseManager : NetworkBehaviour
     }
 
     /// <summary>
-    /// Call this from your purchase logic to update the Firestore doc 
-    /// and notify all listening clients.
+    /// Updates Firestore with the latest purchase information to notify all clients.
     /// </summary>
     public void UpdateLatestPurchaseInFirestore(string imageUrl, string purchasedByUserId)
     {
@@ -492,11 +550,18 @@ public class FirebaseManager : NetworkBehaviour
         });
     }
 
+
+    /// <summary>
+    /// Displays a temporary on-screen notification message related to purchases.
+    /// </summary>
     public void ShowPurchaseNotification(string message, float duration = 2f)
     {
         StartCoroutine(ShowPurchaseNotificationRoutine(message, duration));
     }
 
+    /// <summary>
+    /// Coroutine that shows a purchase notification on screen for a given duration.
+    /// </summary>
     private IEnumerator ShowPurchaseNotificationRoutine(string message, float duration)
     {
         purchaseNotifText.text = message;
@@ -504,5 +569,4 @@ public class FirebaseManager : NetworkBehaviour
         yield return new WaitForSeconds(duration);
         purchaseNotifText.gameObject.SetActive(false);
     }
-
 }

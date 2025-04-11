@@ -9,12 +9,17 @@ using UnityEngine.Networking;
 using System.Linq;
 using Unity.Netcode;
 
+/// <summary>
+/// Unity NetworkBehaviour that manages the DLC store functionality,
+/// including UI interactions, Firebase data retrieval, and image selection or purchase.
+/// </summary>
+
 public class DlcStoreManager : NetworkBehaviour
 {
     private Button lastLockedButton = null;
     private TextMeshProUGUI lastLockedButtonText = null;
 
-    [Header("UI Elements")]
+    [Header("Firebase Related Components")]
     [SerializeField] private GameObject dlcStorePanel;     // The panel toggled with M key
     [SerializeField] private GameObject dlcItemPrefab;     // Prefab containing Image + Button
     [SerializeField] private Transform dlcContainer;       // Parent container for prefabs
@@ -22,18 +27,26 @@ public class DlcStoreManager : NetworkBehaviour
 
     private FirebaseFirestore db;
 
+    /// <summary>
+    /// Initializes Firebase Firestore and loads available DLC profile images on start.
+    /// </summary>
     private void Start()
     {
         db = FirebaseFirestore.DefaultInstance;
-        //dlcStorePanel.SetActive(false); // Hide store initially
         LoadProfilePictureOptions();
     }
 
+    /// <summary>
+    /// Called when the network object is spawned. Logs the network spawn event.
+    /// </summary>
     public override void OnNetworkSpawn()
     {
         Debug.Log($"[DlcStoreManager] OnNetworkSpawn called on client {NetworkManager.Singleton.LocalClientId}");
     }
 
+    /// <summary>
+    /// Checks for input key press to toggle the visibility of the DLC store panel.
+    /// </summary>
     private void Update()
     {
         // Toggle DLC store visibility with M key
@@ -43,6 +56,10 @@ public class DlcStoreManager : NetworkBehaviour
         }
     }
 
+    /// <summary>
+    /// Loads all profile picture options from Firestore and sets up the UI accordingly.
+    /// Determines if each image is owned or available for purchase and sets up the correct button handlers.
+    /// </summary>
     private void LoadProfilePictureOptions()
     {
         db.Collection("ProfilePics").GetSnapshotAsync().ContinueWithOnMainThread(task =>
@@ -159,6 +176,12 @@ public class DlcStoreManager : NetworkBehaviour
         });
     }
 
+    /// <summary>
+    /// Coroutine that downloads an image from a URL and applies it to the provided Image component.
+    /// </summary>
+    /// <param name="url">The URL of the image to download.</param>
+    /// <param name="target">The Image UI component to apply the downloaded texture to.</param>
+    /// <returns>IEnumerator for coroutine execution.</returns>
     private IEnumerator LoadImage(string url, Image target)
     {
         using (UnityWebRequest request = UnityWebRequestTexture.GetTexture(url))

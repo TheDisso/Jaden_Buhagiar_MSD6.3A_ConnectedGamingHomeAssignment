@@ -9,20 +9,29 @@ using System.Collections;
 using Unity.Netcode.Components;
 
 /// <summary>
-/// Manages the visual representation of the chess board and piece placement.
-/// Inherits from MonoBehaviourSingleton to ensure only one instance exists.
+/// Handles the visual board and piece placement for a multiplayer chess game.
+/// Synchronizes piece creation, square mapping, and visual updates across networked clients.
+/// Inherits from a singleton base class to ensure a single instance.
 /// </summary>
 public class BoardManager : NetworkBehaviourSingleton<BoardManager>
 {
+    // Array of all square GameObjects in the scene
     private GameObject[] allSquaresGO = new GameObject[64];
+
+    // Maps logical board squares to actual GameObjects
     private Dictionary<Square, GameObject> positionMap;
 
+    // Constants for board dimensions
     private const float BoardPlaneSideLength = 14f;
     private const float BoardPlaneSideHalfLength = BoardPlaneSideLength * 0.5f;
     private const float BoardHeight = 1.6f;
 
+    // The square prefab used to instantiate missing board squares.
     public GameObject Square;
 
+    /// <summary>
+    /// Called when the networked object spawns. Sets up listeners and initializes square mapping.
+    /// </summary>
     public override void OnNetworkSpawn()
     {
         if (IsServer)
@@ -41,6 +50,9 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager>
         }
     }
 
+    /// <summary>
+    /// Initializes the square-to-position map using GameObjects tagged "Square".
+    /// </summary>
     private void InitializePreplacedSquares()
     {
         if (positionMap == null)
@@ -65,7 +77,7 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager>
     }
 
     /// <summary>
-    /// Maps the pre-placed board squares to `positionMap`
+    /// Initializes square mappings by checking the child GameObjects under the board root.
     /// </summary>
     private void InitializePrePlacedBoard()
     {
@@ -90,6 +102,9 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager>
         Debug.Log($"[BoardManager] Pre-placed board squares mapped. Total: {positionMap.Count}");
     }
 
+    /// <summary>
+    /// Coroutine that waits until all squares are initialized before syncing names to clients.
+    /// </summary>
     private IEnumerator WaitForSquaresThenSync()
     {
         Debug.Log("[BoardManager] Waiting for squares to be initialized on client...");
@@ -121,6 +136,9 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager>
         Debug.LogError("[BoardManager] ERROR: Some squares still missing after waiting.");
     }
 
+    /// <summary>
+    /// Server-side method that syncs square names to clients using RPC.
+    /// </summary>
     [ServerRpc(RequireOwnership = false)]
     private void RequestSquareNameSyncServerRpc()
     {
@@ -134,12 +152,18 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager>
         }
     }
 
+    /// <summary>
+    /// Client-side RPC that begins renaming square GameObjects once available.
+    /// </summary>
     [ClientRpc]
     private void SyncSquareNameClientRpc(ulong networkId, string correctName)
     {
         StartCoroutine(RenameSquareWhenReady(networkId, correctName));
     }
 
+    /// <summary>
+    /// Coroutine that attempts to find and rename a square by its network ID.
+    /// </summary>
     private IEnumerator RenameSquareWhenReady(ulong networkId, string correctName)
     {
         float timeout = 3f;
@@ -159,7 +183,9 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager>
         Debug.LogError($"[BoardManager] ERROR: Could not find NetworkObject {networkId} to rename.");
     }
 
-
+    /// <summary>
+    /// RPC that synchronizes all board square positions for late-joining clients.
+    /// </summary>
     [ClientRpc]
     private void SyncBoardClientRpc(string serializedData)
     {
@@ -216,7 +242,7 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager>
     }
 
     /// <summary>
-    /// Converts a file or rank index (1-8) to its corresponding world position.
+    /// Converts a file or rank index (1-8) to a world space position on the board.
     /// </summary>
     private static float FileOrRankToSidePosition(int index)
     {
@@ -224,6 +250,9 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager>
         return Mathf.Lerp(-BoardPlaneSideHalfLength, BoardPlaneSideHalfLength, t);
     }
 
+    /// <summary>
+    /// Spawns all visual pieces at the start of a new game.
+    /// </summary>
     private void OnNewGameStarted()
     {
         Debug.Log("[BoardManager] OnNewGameStarted triggered! Spawning pieces.");
@@ -240,12 +269,18 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager>
         }
     }
 
+    /// <summary>
+    /// Returns the GameObject of the piece on the given square, or null if empty.
+    /// </summary>
     public GameObject GetPieceGOAtPosition(Square position)
     {
         GameObject square = GetSquareGOByPosition(position);
         return square.transform.childCount == 0 ? null : square.transform.GetChild(0).gameObject;
     }
 
+    /// <summary>
+    /// Handles visual piece refresh after the game is reset to a specific half-move.
+    /// </summary>
     private void OnGameResetToHalfMove()
     {
         ClearBoard();
@@ -261,6 +296,9 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager>
             EnsureOnlyPiecesOfSideAreEnabled(GameManager.Instance.SideToMove);
     }
 
+    /// <summary>
+    /// Moves a rook to its castled position visually during a castling move.
+    /// </summary>
     public void CastleRook(Square rookPosition, Square endSquare)
     {
         GameObject rookGO = GetPieceGOAtPosition(rookPosition);
@@ -268,6 +306,10 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager>
         rookGO.transform.localPosition = Vector3.zero;
     }
 
+    /// <summary>
+    /// Instantiates and positions a visual piece GameObject based on piece data and position.
+    /// Also handles ownership assignment and network spawning.
+    /// </summary>
     public void CreateAndPlacePieceGO(Piece piece, Square position)
     {
         if (!IsServer) return; // Ensure only server creates objects
@@ -329,12 +371,18 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager>
         SetPieceParentClientRpc(JsonConvert.SerializeObject(new NetworkSquare(position)), netObj);
     }
 
+    /// <summary>
+    /// RPC sent to clients to position a newly spawned piece under the correct square.
+    /// </summary>
     [ClientRpc]
     private void SetPieceParentClientRpc(string networkSquareJson, NetworkObjectReference pieceRef)
     {
         StartCoroutine(WaitForSquareAndSetParent(networkSquareJson, pieceRef));
     }
 
+    /// <summary>
+    /// Coroutine that waits until the referenced square exists before re-parenting the piece.
+    /// </summary>
     private IEnumerator WaitForSquareAndSetParent(string networkSquareJson, NetworkObjectReference pieceRef)
     {
         NetworkSquare networkSquare = JsonConvert.DeserializeObject<NetworkSquare>(networkSquareJson);
@@ -377,6 +425,10 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager>
         }
     }
 
+
+    /// <summary>
+    /// Fills a list with all square GameObjects within a given radius from a world position.
+    /// </summary>
     public void GetSquareGOsWithinRadius(List<GameObject> squareGOs, Vector3 positionWS, float radius)
     {
         if (allSquaresGO.Length == 0)
@@ -393,6 +445,9 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager>
         }
     }
 
+    /// <summary>
+    /// Enables or disables all visual chess pieces in the scene.
+    /// </summary>
     public void SetActiveAllPieces(bool active)
     {
         VisualPiece[] visualPiece = GetComponentsInChildren<VisualPiece>(true);
@@ -411,6 +466,9 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager>
         }
     }*/
 
+    /// <summary>
+    /// Enables only the pieces belonging to the specified side, used to restrict movement.
+    /// </summary>
     public void EnsureOnlyPiecesOfSideAreEnabled(Side side)
     {
         VisualPiece[] visualPieces = GetComponentsInChildren<VisualPiece>(true);
@@ -439,6 +497,9 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager>
         }
     }
 
+    /// <summary>
+    /// Destroys a visual piece GameObject located at a given square.
+    /// </summary>
     public void TryDestroyVisualPiece(Square position)
     {
         VisualPiece visualPiece = positionMap[position].GetComponentInChildren<VisualPiece>();
@@ -446,6 +507,9 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager>
             DestroyImmediate(visualPiece.gameObject);
     }
 
+    /// <summary>
+    /// Destroys all visual chess pieces from the board. Server-only.
+    /// </summary>
     private void ClearBoard()
     {
         if (IsServer)
@@ -457,6 +521,10 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager>
             }
         }
     }
+
+    /// <summary>
+    /// Returns the GameObject associated with a specific square.
+    /// </summary>
     public GameObject GetSquareGOByPosition(Square position)
     {
         return positionMap.ContainsKey(position) ? positionMap[position] : null;
@@ -475,6 +543,10 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager>
     }*/
 }
 
+/// <summary>
+/// Serializable data structure for representing a square's name and 3D world position.
+/// Used to synchronize square layout across clients.
+/// </summary>
 [Serializable]
 public class SquareData
 {
@@ -483,6 +555,10 @@ public class SquareData
     public float y;
     public float z;
 
+
+    /// <summary>
+    /// Constructs a SquareData object from a name and world position.
+    /// </summary>
     public SquareData(string name, Vector3 position)
     {
         Name = name;
@@ -491,6 +567,9 @@ public class SquareData
         z = position.z;
     }
 
+    /// <summary>
+    /// Converts this SquareData object back to a Unity Vector3.
+    /// </summary>
     public Vector3 ToVector3()
     {
         return new Vector3(x, y, z);

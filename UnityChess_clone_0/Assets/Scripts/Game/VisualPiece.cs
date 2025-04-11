@@ -8,13 +8,21 @@ using static UnityChess.SquareUtil;
 using System;
 
 /// <summary>
-/// Represents a visual chess piece in the game. This component handles user interaction,
-/// such as dragging and dropping pieces, and determines the closest square on the board
-/// where the piece should land. It also raises an event when a piece has been moved.
+/// Represents a visual chess piece in the game. Handles user interaction such as dragging and dropping,
+/// detects valid board square targets, and sends validated move requests to the server.
 /// </summary>
 public class VisualPiece : NetworkBehaviour
 {
+    /// <summary>
+    /// Delegate signature for when a piece is visually moved.
+    /// </summary>
+    /// <param name="movedPieceInitialSquare">The square the piece started on.</param>
+    /// <param name="movedPieceTransform">The transform of the moved piece.</param>
+    /// <param name="closestBoardSquareTransform">The transform of the destination square.</param>
+    /// <param name="promotionPiece">Optional promotion piece if promotion occurs.</param>
     public delegate void VisualPieceMovedAction(Square movedPieceInitialSquare, Transform movedPieceTransform, Transform closestBoardSquareTransform, Piece promotionPiece = null);
+    
+    // Event invoked when a visual piece is dropped onto a square.
     public static event VisualPieceMovedAction VisualPieceMoved;
 
     private const float SquareCollisionRadius = 9f;
@@ -23,8 +31,12 @@ public class VisualPiece : NetworkBehaviour
     private List<GameObject> potentialLandingSquares;
     private Transform thisTransform;
 
+    // The color (side) this piece belongs to (White or Black).
     public Side PieceColor;
 
+    /// <summary>
+    /// Returns the square this piece is currently located on, based on its parent's name.
+    /// </summary>
     public Square CurrentSquare
     {
         get
@@ -49,6 +61,9 @@ public class VisualPiece : NetworkBehaviour
         }
     }
 
+    /// <summary>
+    /// Initializes internal references when the piece is instantiated.
+    /// </summary>
     private void Start()
     {
         potentialLandingSquares = new List<GameObject>();
@@ -56,6 +71,10 @@ public class VisualPiece : NetworkBehaviour
         boardCamera = Camera.main;
     }
 
+    /// <summary>
+    /// Called when the user begins to click on this piece.
+    /// Performs turn validation and prepares for dragging.
+    /// </summary>
     public void OnMouseDown()
     {
         Debug.Log($"[VisualPiece] Player {NetworkManager.Singleton.LocalClientId} clicked {PieceColor} at {CurrentSquare}. Owner: {IsOwner}");
@@ -79,6 +98,9 @@ public class VisualPiece : NetworkBehaviour
         }
     }
 
+    /// <summary>
+    /// Called while the piece is being dragged by the mouse. Updates position in world space.
+    /// </summary>
     private void OnMouseDrag()
     {
         if (!GameManager.Instance.IsPlayerTurn()) return;
@@ -92,12 +114,19 @@ public class VisualPiece : NetworkBehaviour
         }
     }
 
+    /// <summary>
+    /// Server RPC that updates the piece's position in world space during dragging.
+    /// </summary>
     [ServerRpc(RequireOwnership = false)]
     private void MovePieceServerRpc(float x, float y, float z)
     {
         transform.position = new Vector3(x, y, z);
     }
 
+    /// <summary>
+    /// Called when the player releases the mouse button.
+    /// Snaps the piece to the closest valid square and sends move request to server.
+    /// </summary>
     public void OnMouseUp()
     {
         if (!GameManager.Instance.IsPlayerTurn() || PieceColor != GameManager.Instance.SideToMove)
@@ -138,8 +167,10 @@ public class VisualPiece : NetworkBehaviour
     }
 
     /// <summary>
-    /// Sends move request to server as JSON string.
+    /// Sends a JSON-serialized move request to the server.
+    /// Server deserializes and validates the move before execution.
     /// </summary>
+    /// <param name="moveJson">The serialized move in JSON format.</param>
     [ServerRpc(RequireOwnership = false)]
     private void RequestMoveServerRpc(string moveJson)
     {
@@ -162,23 +193,4 @@ public class VisualPiece : NetworkBehaviour
             Debug.LogError($"[VisualPiece] Error deserializing moveJson: {ex.Message}\nJSON: {moveJson}");
         }
     }
-
-    /*public bool IsPlayerTurn()
-    {
-        if (GameManager.Instance.PlayersConnected.Count != 2)
-        {
-            Debug.LogWarning($"[VisualPiece] Player {NetworkManager.Singleton.LocalClientId} can't move - not all players are connected.");
-            return false;
-        }
-
-        ulong localPlayerId = GameManager.Instance.LocalPlayerId;
-        Side turn = GameManager.Instance.SideToMove;
-
-        bool isTurn = (turn == Side.White && localPlayerId == GameManager.Instance.PlayersConnected[0]) ||
-                      (turn == Side.Black && localPlayerId == GameManager.Instance.PlayersConnected[1]);
-
-        Debug.Log($"[VisualPiece] Player {localPlayerId} turn check: {isTurn}, Turn: {turn}, Players: {GameManager.Instance.PlayersConnected[0]} (White) vs {GameManager.Instance.PlayersConnected[1]} (Black)");
-
-        return isTurn;
-    }*/
 }

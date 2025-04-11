@@ -5,11 +5,19 @@ using Unity.Netcode;
 using UnityEngine;
 using UnityEngine.UI;
 
+/// <summary>
+/// Manages network session startup logic (host, client, server) for the multiplayer experience.
+/// Inherits from a generic singleton to ensure a single instance across the session.
+/// </summary>
 public class NetworkMgr : NetworkBehaviourSingleton<NetworkMgr>
 {
+    [Header("Firebase Related Components")]
     public FirebaseManager firebaseManager;
     public TextMeshProUGUI sessionUserIndicatorText;
 
+    /// <summary>
+    /// Starts the game as the host. Logs analytics and updates the session label.
+    /// </summary>
     public void StartHost()
     {
         if (!NetworkManager.Singleton.IsHost && !NetworkManager.Singleton.IsClient)
@@ -27,6 +35,9 @@ public class NetworkMgr : NetworkBehaviourSingleton<NetworkMgr>
         }
     }
 
+    /// <summary>
+    /// Starts the game as a client. Logs analytics and updates the session label.
+    /// </summary>
     public void StartClient()
     {
         if (!NetworkManager.Singleton.IsClient && !NetworkManager.Singleton.IsHost)
@@ -44,6 +55,9 @@ public class NetworkMgr : NetworkBehaviourSingleton<NetworkMgr>
         }
     }
 
+    /// <summary>
+    /// Starts the game as a dedicated server.
+    /// </summary>
     public void StartServer()
     {
         if (!NetworkManager.Singleton.IsServer && !NetworkManager.Singleton.IsHost)

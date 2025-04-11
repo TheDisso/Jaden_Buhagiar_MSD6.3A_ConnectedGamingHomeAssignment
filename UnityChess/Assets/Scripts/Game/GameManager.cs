@@ -14,9 +14,9 @@ using Firebase.Firestore;
 using Firebase.Extensions;
 
 /// <summary>
-/// Manages the overall game state, including game start, moves execution,
-/// special moves handling (such as castling, en passant, and promotion), and game reset.
-/// Inherits from a singleton base class to ensure a single instance throughout the application.
+/// Manages the overall multiplayer chess game state.
+/// Handles game initialization, turn control, piece interaction, special move logic,
+/// client/server syncing, and Firebase-based saving/loading.
 /// </summary>
 public class GameManager : NetworkBehaviourSingleton<GameManager>
 {
@@ -25,14 +25,19 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
     public static event Action GameEndedEvent;
     public static event Action GameResetToHalfMoveEvent;
     public static event Action MoveExecutedEvent;
+
+    /// <summary>Indicates which side is currently allowed to move, synced across the network.</summary>
     public NetworkVariable<Side> NetworkSideToMove = new NetworkVariable<Side>(Side.White,
     NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
 
+    /// <summary>The player ID of this local client.</summary>
     public ulong LocalPlayerId => NetworkManager.Singleton.LocalClientId;
+    /// <summary>List of currently connected player client IDs.</summary>
     public List<ulong> PlayersConnected = new List<ulong>();
 
     public NetworkVariable<bool> isCurrTurn = new NetworkVariable<bool>();
 
+    /// <summary>The current game instance, including board state and move timelines.</summary>
     private Game game;
 
     private float lastPingTime;
@@ -40,6 +45,10 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
     private float pingTimer;
     public TextMeshProUGUI pingTxt; // UI element to display ping
 
+    /// <summary>
+    /// Called when the network object is spawned.
+    /// Initializes listeners and sets the first move side on server.
+    /// </summary>
     public override void OnNetworkSpawn()
     {
         base.OnNetworkSpawn();
@@ -53,6 +62,9 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
         }
     }
 
+    /// <summary>
+    /// Ensures the game object is initialized even in standalone (non-network) mode.
+    /// </summary>
     private void Awake()
     {
         // Ensure the game is created as soon as the GameManager is loaded
@@ -63,6 +75,9 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
         }
     }
 
+    /// <summary>
+    /// Returns the current board instance, null-safe.
+    /// </summary>
     public Board CurrentBoard
     {
         get
@@ -78,30 +93,9 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
     }
 
     /// <summary>
-    /// Returns the current turn's side.
+    /// Gets or sets which side is allowed to move next.
+    /// Uses NetworkVariable to sync across clients.
     /// </summary>
-    /*public Side SideToMove
-    {
-        get
-        {
-            game.ConditionsTimeline.TryGetCurrent(out GameConditions currentConditions);
-            return currentConditions.SideToMove;
-        }
-        set
-        {
-            game.ConditionsTimeline.TryGetCurrent(out GameConditions currentConditions);
-            currentConditions = new GameConditions(value,
-                currentConditions.WhiteCanCastleKingside,
-                currentConditions.WhiteCanCastleQueenside,
-                currentConditions.BlackCanCastleKingside,
-                currentConditions.BlackCanCastleQueenside,
-                currentConditions.EnPassantSquare,
-                currentConditions.HalfMoveClock,
-                currentConditions.TurnNumber
-            );
-            game.ConditionsTimeline[game.ConditionsTimeline.HeadIndex] = currentConditions;
-        }
-    }*/
     public Side SideToMove
     {
         get => NetworkSideToMove.Value; // Clients now read from the NetworkVariable
@@ -152,6 +146,9 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
     private bool isWhiteAI;
     private bool isBlackAI;
 
+    /// <summary>
+    /// Returns a list of all (Square, Piece) pairs currently on the board.
+    /// </summary>
     public List<(Square, Piece)> CurrentPieces
     {
         get
@@ -191,12 +188,18 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
     // Currently selected serialization type (default is FEN).
     private GameSerializationType selectedSerializationType = GameSerializationType.FEN;
 
+    /// <summary>
+    /// Initializes event listeners and starts a new game on server startup.
+    /// </summary>
     public void Start()
     {
         VisualPiece.VisualPieceMoved += OnPieceMoved;
         StartNewGame();
     }
 
+    /// <summary>
+    /// Starts a new game instance on the server and notifies all listeners.
+    /// </summary>
     public async void StartNewGame()
     {
         if (IsServer)
@@ -207,6 +210,9 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
         }
     }
 
+    /// <summary>
+    /// Regularly updates network latency and initiates ping-pong communication for clients.
+    /// </summary>
     private void Update()
     {
         pingTimer += Time.deltaTime;
@@ -236,11 +242,11 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
     private void PingServerRpc(float clientTime, ServerRpcParams rpcParams = default)
     {
         // Immediately respond back to client
-        PongClientRpc(clientTime);
+        PingClientRpc(clientTime);
     }
 
     [ClientRpc]
-    private void PongClientRpc(float clientTime)
+    private void PingClientRpc(float clientTime)
     {
         float roundTripTime = (Time.time - clientTime) * 1000f; // in ms
         lastPingDuration = roundTripTime;
@@ -250,7 +256,7 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
     }
 
     /// <summary>
-    /// Executes a move on the server and sends updates to clients.
+    /// Attempts to execute a move by coordinates. If legal, reassigns turn.
     /// </summary>
     public void ExecuteMove(int fromFile, int fromRank, int toFile, int toRank)
     {
@@ -281,9 +287,8 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
     }*/
 
     /// <summary>
-    /// Blocks until the user selects a piece for pawn promotion.
+    /// Waits for the player to choose a promotion piece (UI driven).
     /// </summary>
-    /// <returns>The elected promotion piece chosen by the user.</returns>
     private ElectedPiece GetUserPromotionPieceChoice()
     {
         // Wait until the user selects a promotion piece.
@@ -296,10 +301,8 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
     }
 
     /// <summary>
-    /// Handles special move behavior asynchronously (castling, en passant, and promotion).
+    /// Handles castling, en passant, and promotion moves.
     /// </summary>
-    /// <param name="specialMove">The special move to process.</param>
-    /// <returns>A task that resolves to true if the special move was handled; otherwise, false.</returns>
     private async Task<bool> TryHandleSpecialMoveBehaviourAsync(SpecialMove specialMove)
     {
         switch (specialMove)
@@ -355,6 +358,9 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
         }
     }
 
+    /// <summary>
+    /// Listens for piece drag/move interaction and validates the action.
+    /// </summary>
     private async void OnPieceMoved(Square movedPieceInitialSquare, Transform movedPieceTransform, Transform closestBoardSquareTransform, Piece promotionPiece = null)
     {
         ulong localPlayerId = NetworkManager.Singleton.LocalClientId;
@@ -406,6 +412,9 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
         }
     }
 
+    /// <summary>
+    /// Requests the server to move a piece and reparent it on the board.
+    /// </summary>
     [ServerRpc(RequireOwnership = false)]
     private void RequestMovePieceServerRpc(int fromFile, int fromRank, int toFile, int toRank, NetworkObjectReference pieceRef)
     {
@@ -444,6 +453,9 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
         }
     }
 
+    /// <summary>
+    /// Reparents a piece on the client to the new board square.
+    /// </summary>
     [ClientRpc]
     private void UpdatePiecePositionClientRpc(NetworkObjectReference pieceRef, string squareName)
     {
@@ -464,31 +476,9 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
         }
     }
 
-    /// Client RPC to update all players
-    /*[ClientRpc]
-    private void MovePieceOnClientsClientRpc(int movePieceInitSquareFile, int movePieceInitSquareRank, int squareFile, int squareRank, NetworkObjectReference pieceRef)
-    {
-        Square movePieceInitSquare = new Square(movePieceInitSquareFile, movePieceInitSquareRank);
-        Square endSquare = new Square(squareFile, squareRank);
-
-        if (pieceRef.TryGet(out NetworkObject pieceNetObj))
-        {
-            Transform pieceTransform = pieceNetObj.transform;
-            GameObject targetSquareGO = BoardManager.Instance.GetSquareGOByPosition(endSquare);
-
-            if (targetSquareGO != null)
-            {
-                pieceTransform.SetParent(targetSquareGO.transform);
-                pieceTransform.position = targetSquareGO.transform.position;
-                Debug.Log($"[BoardManager] Successfully moved piece on client to {endSquare}");
-            }
-            else
-            {
-                Debug.LogError($"[BoardManager] ERROR: Could not find target square {endSquare}");
-            }
-        }
-    }*/
-
+    /// <summary>
+    /// Checks if it is currently this client's turn.
+    /// </summary>
     public bool IsPlayerTurn()
     {
         if (PlayersConnected.Count != 2)
@@ -507,6 +497,10 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
         return isTurn;
     }
 
+    /// <summary>
+    /// Synchronizes player list when someone joins the session.
+    /// Sends current game state to the new player.
+    /// </summary>
     public void OnClientPlayerConnected(ulong clientId)
     {
         PlayersConnected.Add(clientId);
@@ -527,17 +521,27 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
         }
     }
 
+    /// <summary>
+    /// Removes a player from the list when they disconnect.
+    /// </summary>
     private void OnClientPlayerDisconnected(ulong id)
     {
         PlayersConnected.Remove(id);
     }
 
+
+    /// <summary>
+    /// Updates all clients with the new list of connected players.
+    /// </summary>
     [ClientRpc]
     private void UpdatePlayersClientRpc(ulong[] playerIDs)
     {
         PlayersConnected = new List<ulong>(playerIDs);
     }
 
+    /// <summary>
+    /// Syncs the game state to a specific client after they connect.
+    /// </summary>
     [ClientRpc]
     private void SyncGameStateClientRpc(string serializedGame, ClientRpcParams clientRpcParams = default)
     {
@@ -548,6 +552,9 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
         }
     }
 
+    /// <summary>
+    /// Switches the current turn to the other side and notifies clients.
+    /// </summary>
     public void AssignRole()
     {
         if (IsServer) // Ensure only the server changes the turn
@@ -563,6 +570,9 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
         }
     }
 
+    /// <summary>
+    /// Informs all clients about the currently active turn.
+    /// </summary>
     [ClientRpc]
     private void SyncTurnClientRpc(Side newTurn)
     {
@@ -575,6 +585,9 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
         NetworkSideToMove.Value = newTurn; // Ensure only the SERVER modifies this
     }
 
+    /// <summary>
+    /// Ensures interactivity is enabled only for pieces of the current turn's side.
+    /// </summary>
     [ClientRpc]
     private void RefreshPieceInteractivityClientRpc(Side side)
     {
@@ -586,12 +599,15 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
         }
     }
 
+    /// <summary>
+    /// Serializes the current game object into a JSON string.
+    /// </summary>
     public string SerializeGame()
     {
         return JsonConvert.SerializeObject(game);
     }
 
-    public void SaveGameState()
+    /*public void SaveGameState()
     {
         string saveFilePath = Path.Combine(Application.persistentDataPath, "savegame.json");
         var settings = new JsonSerializerSettings
@@ -629,8 +645,11 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
         Debug.Log($"[GameManager] Game state loaded from {saveFilePath}");
 
         NewGameStartedEvent?.Invoke();
-    }
+    }*/
 
+    /// <summary>
+    /// Loads a game state from a serialized JSON string.
+    /// </summary>
     public void LoadGame(string serializedGame)
     {
         game = JsonConvert.DeserializeObject<Game>(serializedGame);
@@ -642,19 +661,16 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
     }
 
     /// <summary>
-    /// Determines whether the specified piece has any legal moves.
+    /// Returns whether a piece has any legal moves at its current position.
     /// </summary>
-    /// <param name="piece">The chess piece to evaluate.</param>
-    /// <returns>True if the piece has at least one legal move; otherwise, false.</returns>
     public bool HasLegalMoves(Piece piece)
     {
         return game.TryGetLegalMovesForPiece(piece, out _);
     }
 
     /// <summary>
-    /// Resets the game to a specific half-move index.
+    /// Resets the game to a specific half-move and triggers visual/UI refresh.
     /// </summary>
-    /// <param name="halfMoveIndex">The target half-move index to reset the game to.</param>
     public void ResetGameToHalfMoveIndex(int halfMoveIndex)
     {
         // If the reset operation fails, exit early.
@@ -668,19 +684,24 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
     }
 
     /// <summary>
-    /// Allows the user to elect a promotion piece.
+    /// Sets the piece choice selected by the player for promotion.
     /// </summary>
-    /// <param name="choice">The elected promotion piece.</param>
     public void ElectPiece(ElectedPiece choice)
     {
         userPromotionChoice = choice;
     }
 
+    /// <summary>
+    /// Returns true if the game and board are fully initialized.
+    /// </summary>
     public bool IsGameInitialized()
     {
         return game != null && game.BoardTimeline != null;
     }
 
+    /// <summary>
+    /// Attempts to execute a validated movement. Triggers events based on checkmate/stalemate.
+    /// </summary>
     private bool TryExecuteMove(Movement move)
     {
         if (!game.TryExecuteMove(move))
@@ -711,6 +732,9 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
         return true;
     }
 
+    /// <summary>
+    /// Saves the current board state to Firebase in JSON format.
+    /// </summary>
     public void SaveGameToFirebase()
     {
         List<FirebasePieceData> saveData = new List<FirebasePieceData>();
@@ -737,6 +761,9 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
         });
     }
 
+    /// <summary>
+    /// Loads the board state from Firebase and initializes a new game object.
+    /// </summary>
     public void LoadGameFromFirebase()
     {
         Debug.Log("[GameManager] LoadGameFromFirebase() called!");
@@ -779,6 +806,9 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
         });
     }
 
+    /// <summary>
+    /// Converts FirebasePieceData into a working Game instance.
+    /// </summary>
     private void LoadFromFirebaseData(List<FirebasePieceData> pieces)
     {
         if (pieces == null || pieces.Count == 0)
